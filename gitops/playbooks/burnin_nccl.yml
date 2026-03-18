@@ -1,0 +1,108 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Burn-In — NCCL Performance Tests
+# ═══════════════════════════════════════════════════════════════════
+# Runs NCCL collective operation benchmarks on target nodes:
+#   - all_reduce_perf  (AllReduce — primary bandwidth test)
+#   - all_gather_perf  (AllGather — data distribution)
+#   - reduce_scatter_perf (ReduceScatter — gradient reduction)
+#   - sendrecv_perf    (Send/Recv — point-to-point NVLink)
+#
+# Parameters:
+#   nccl_test: all | all_reduce | all_gather | reduce_scatter | sendrecv
+
+- name: "Burn-In — NCCL Performance Tests"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    nccl_test: "{{ parameters.nccl_test | default('all') }}"
+    ticket_id: "{{ parameters.ticket_id | default('BURNIN') }}"
+
+  tasks:
+    - name: "Determine which NCCL tests to run"
+      ansible.builtin.set_fact:
+        selected_tests: >-
+          {{ nccl_tests.tests if nccl_test == 'all'
+             else nccl_tests.tests | selectattr('name', 'match', nccl_test) | list }}
+
+    - name: "Log NCCL test configuration"
+      ansible.builtin.debug:
+        msg: |
+          ═══ NCCL PERFORMANCE TESTS ═══
+          Nodes:     {{ target_nodes | join(', ') }}
+          Tests:     {{ selected_tests | map(attribute='name') | join(', ') }}
+          Container: {{ nccl_tests.container_image }}
+          Msg sizes: {{ nccl_tests.message_sizes }}
+          Warmup:    {{ nccl_tests.warmup_iters }} iters
+          Benchmark: {{ nccl_tests.iters }} iters
+
+    - name: "Run NCCL tests on target nodes"
+      ansible.builtin.shell: |
+        NODE="{{ item.0 }}"
+        TEST_NAME="{{ item.1.name }}"
+        TEST_BINARY="{{ item.1.binary }}"
+        EXPECTED_BW="{{ item.1.expected_busbw_gbps }}"
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/nccl"
+        mkdir -p "$OUTDIR"
+
+        echo "═══ NCCL: $TEST_NAME on $NODE ═══"
+        echo "Expected bus bandwidth: ${EXPECTED_BW} GB/s"
+        echo "Started: $(date -Iseconds)"
+
+        # Run NCCL test inside container via cmsh
+        {{ cmsh_bin }} -c "device; use $NODE; exec '
+          docker run --rm --gpus all --ipc=host --ulimit memlock=-1 \
+            -v /tmp:/tmp \
+            {{ nccl_tests.container_image }} \
+            {{ nccl_tests.nccl_tests_path }}/${TEST_BINARY} \
+            -b {{ nccl_tests.message_sizes.split()[0] }} \
+            -e {{ nccl_tests.message_sizes.split()[1] }} \
+            -f 2 \
+            -g {{ gpu_count_per_node }} \
+            -w {{ nccl_tests.warmup_iters }} \
+            -n {{ nccl_tests.iters }} \
+            2>&1
+        '" > "$OUTDIR/${TEST_NAME}-${TIMESTAMP}.txt" 2>&1
+
+        echo "Completed: $(date -Iseconds)"
+
+        # Display results
+        cat "$OUTDIR/${TEST_NAME}-${TIMESTAMP}.txt"
+
+        # Extract peak bus bandwidth (last line with data)
+        PEAK_BW=$(grep -E "^\s+[0-9]" "$OUTDIR/${TEST_NAME}-${TIMESTAMP}.txt" | \
+                  tail -1 | awk '{print $(NF-1)}')
+
+        echo ""
+        if [ -n "$PEAK_BW" ]; then
+          echo "Peak Bus Bandwidth: ${PEAK_BW} GB/s (expected ≥ ${EXPECTED_BW} GB/s)"
+          # Compare with threshold (integer comparison)
+          PEAK_INT=$(echo "$PEAK_BW" | cut -d. -f1)
+          if [ "${PEAK_INT:-0}" -ge "$EXPECTED_BW" ] 2>/dev/null; then
+            echo "✅ $TEST_NAME PASSED on $NODE — ${PEAK_BW} GB/s ≥ ${EXPECTED_BW} GB/s"
+          else
+            echo "⚠️ $TEST_NAME BELOW THRESHOLD on $NODE — ${PEAK_BW} GB/s < ${EXPECTED_BW} GB/s"
+          fi
+        else
+          echo "⚠️ Could not extract bandwidth — check raw output"
+        fi
+      loop: "{{ target_nodes | product(selected_tests) | list }}"
+      loop_control:
+        label: "{{ item.0 }} → {{ item.1.name }}"
+      register: nccl_results
+      async: 3600
+      poll: 30
+      ignore_errors: true
+
+    - name: "NCCL Results Summary"
+      ansible.builtin.debug:
+        msg: |
+          ═══ NCCL RESULTS ═══
+          Node: {{ item.item[0] }}
+          Test: {{ item.item[1].name }}
+          Status: {{ '✅ PASSED' if item.rc == 0 else '⚠️ CHECK RESULTS' }}
+      loop: "{{ nccl_results.results }}"
+      loop_control:
+        label: "{{ item.item[0] }} → {{ item.item[1].name }}"

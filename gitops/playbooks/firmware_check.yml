@@ -1,0 +1,13 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — Firmware Check
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — Firmware Version Check"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    update_firmware: "{{ parameters.update_firmware | default(false) }}"
+  roles:
+    - bcm_firmware

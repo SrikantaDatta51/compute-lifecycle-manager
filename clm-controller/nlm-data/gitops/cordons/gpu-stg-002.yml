@@ -1,0 +1,10 @@
+apiVersion: nlm.cic.io/v1
+kind: Cordon
+metadata:
+  name: gpu-stg-002
+  created_at: '2026-03-14T08:45:32.522255+00:00'
+  created_by: nlm-testing
+spec:
+  owner: nlm-testing
+  priority: P0
+  reason: 'L1 test failure: GPU thermal throttle'

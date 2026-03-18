@@ -1,0 +1,82 @@
+# NLM Global Configuration
+nlm:
+  version: "2.0.0"
+  mode: mock  # mock | production
+  log_level: INFO
+
+database:
+  engine: sqlite
+  path: nlm-data/nlm.db
+
+netbox:
+  enabled: true
+  mode: mock  # mock | real
+  url: http://localhost:8001
+  token: mock-token-nlm-dev
+  sync_interval_seconds: 30
+
+adapters:
+  bcm:
+    enabled: true
+    mode: mock
+    head_node: bcm-head.local
+    ssh_user: admin
+  kubernetes:
+    enabled: true
+    mode: real  # Use real minikube
+    kubeconfig: ~/.kube/config
+    context: minikube
+  bare_metal:
+    enabled: true
+    mode: mock
+    ipmi_user: admin
+    ipmi_pass: mock-password
+
+alerting:
+  slack:
+    enabled: true
+    mode: mock  # mock → logs to file
+    webhook_url: https://hooks.slack.com/mock
+    channels:
+      critical: "#nlm-critical"
+      dc_infra: "#dc-infra-rma"
+      customer: "#customer-ops"
+      network: "#network-ops"
+      storage: "#storage-ops"
+      compute: "#compute-platform"
+      capacity: "#capacity-planning"
+  pagerduty:
+    enabled: true
+    mode: mock
+    routing_key: mock-pd-key
+
+fleet:
+  environments:
+    - name: AZ1 Prod
+      az: az1
+      backends: [bcm, kubernetes]
+      node_prefix: ["gpu-h200", "gpu-b200", "cpu-az1"]
+    - name: AZ1 Dev
+      az: az1
+      backends: [kubernetes]
+      node_prefix: ["gpu-dev"]
+    - name: Staging
+      az: staging
+      backends: [bcm, kubernetes, bare_metal]
+      node_prefix: ["gpu-stg"]
+    - name: AZ2 Prod BMaaS
+      az: az2
+      backends: [bare_metal]
+      node_prefix: ["gpu-bm", "cpu-az2"]
+    - name: AZ2 Prod K8s
+      az: az2
+      backends: [kubernetes]
+      node_prefix: ["gpu-k8s"]
+
+thresholds:
+  ecc_correctable_7d: 1000
+  ib_crc_per_hour: 1000
+  smart_reallocated: 10
+  gpu_temp_critical: 90
+  nvlink_uncorrectable: 0
+  ecc_uncorrectable: 0

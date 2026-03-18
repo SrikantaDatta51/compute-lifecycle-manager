@@ -1,0 +1,8 @@
+operation: day2_uncordon
+targets:
+- gpu-h200-010
+parameters:
+  reason_type: test_passed
+requested_by: nlm-testing@nlm.cic.io
+approved_by: nlm-testing@nlm.cic.io
+reason: "L1 test passed \u2014 recertified"

@@ -1,0 +1,9 @@
+apiVersion: nlm.cic.io/v1
+kind: Policy
+metadata:
+  name: health-thresholds
+  updated_at: '2026-03-14T08:40:32.217281+00:00'
+spec:
+  critical_threshold: 0.5
+  warning_threshold: 0.7
+  auto_cordon_below: 0.5

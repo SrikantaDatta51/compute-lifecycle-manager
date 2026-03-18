@@ -1,0 +1,170 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Ansible GitOps — Global Variables
+# ═══════════════════════════════════════════════════════════════════
+
+# ── Fleet Metadata ──
+fleet_name: "CIC DGX B200 BMaaS"
+fleet_size: 66           # 64 customer + 2 buffer
+buffer_nodes: 2
+gpu_model: "B200"
+gpu_count_per_node: 8
+
+# ── BCM Commands ──
+cmsh_bin: /usr/bin/cmsh
+ipmitool_bin: /usr/bin/ipmitool
+
+# ── Debug Bundle — Command Sets ──
+# Each set defines a group of diagnostic commands to run on target nodes.
+debug_commands:
+  gpu:
+    - { name: "nvidia-smi-query",       cmd: "nvidia-smi -q" }
+    - { name: "nvidia-smi-topo",        cmd: "nvidia-smi topo -m" }
+    - { name: "nvidia-smi-nvlink",      cmd: "nvidia-smi nvlink --status" }
+    - { name: "nvidia-smi-nvlink-err",  cmd: "nvidia-smi nvlink -e" }
+    - { name: "nvidia-bug-report",      cmd: "nvidia-bug-report.sh --safe-mode" }
+    - { name: "dcgmi-diag-r1",          cmd: "dcgmi diag -r 1" }
+    - { name: "dcgmi-health",           cmd: "dcgmi health -c -j" }
+
+  ib:
+    - { name: "ibstat",                 cmd: "ibstat" }
+    - { name: "perfquery",              cmd: "perfquery -x" }
+    - { name: "mlxlink-mlx5_0",        cmd: "mlxlink -d mlx5_0 -m 2>/dev/null || echo 'mlx5_0 not available'" }
+    - { name: "mlxlink-mlx5_1",        cmd: "mlxlink -d mlx5_1 -m 2>/dev/null || echo 'mlx5_1 not available'" }
+    - { name: "mlxfwmanager",           cmd: "mlxfwmanager --query" }
+    - { name: "ibdiagnet",              cmd: "ibdiagnet --ls 2>/dev/null || echo 'ibdiagnet not available'" }
+
+  nvsm:
+    - { name: "nvsm-dump",             cmd: "nvsm dump 2>/dev/null || echo 'nvsm not installed'" }
+    - { name: "nvsm-show-health",      cmd: "nvsm show health 2>/dev/null || echo 'nvsm not installed'" }
+
+  system:
+    - { name: "dmesg",                 cmd: "dmesg --time-format iso" }
+    - { name: "journalctl-24h",        cmd: "journalctl --since '24 hours ago' --no-pager -l" }
+    - { name: "kern-log-tail",         cmd: "tail -500 /var/log/kern.log 2>/dev/null || echo 'no kern.log'" }
+    - { name: "ipmi-sel",              cmd: "ipmitool sel elist" }
+    - { name: "ipmi-sensors",          cmd: "ipmitool sensor list" }
+    - { name: "dmidecode-system",      cmd: "dmidecode -t system" }
+    - { name: "lspci-gpu",             cmd: "lspci | grep -i nvidia" }
+    - { name: "df-h",                  cmd: "df -h" }
+    - { name: "free-h",                cmd: "free -h" }
+    - { name: "uptime",                cmd: "uptime" }
+
+  firmware:
+    - { name: "nvfwupd-versions",      cmd: "nvfwupd show_version 2>/dev/null || echo 'nvfwupd not found'" }
+    - { name: "mlxfwmanager-query",    cmd: "mlxfwmanager --query" }
+    - { name: "bmc-fw-version",        cmd: "ipmitool mc info" }
+
+# ── Services ──
+gpu_services:
+  - nvidia-fabricmanager
+  - nvidia-dcgm
+
+# ── Slurm Drain Reasons ──
+drain_reasons:
+  fault: "fault-detected"
+  maintenance: "planned-maint"
+  rma: "rma-active"
+  sanity: "sanity-pending"
+
+# ═══════════════════════════════════════════════════════════════════
+# Burn-In & Benchmark Configuration
+# ═══════════════════════════════════════════════════════════════════
+
+# ── DCGMI Diagnostic Levels ──
+dcgmi_levels:
+  quick:
+    level: 1
+    description: "Quick health check (~2 min)"
+    timeout: 300
+  medium:
+    level: 3
+    description: "Extended diagnostics — stress test, PCIe, memory (~15 min)"
+    timeout: 1200
+  full:
+    level: 4
+    description: "Full system validation — all tests including NVLink (~90 min)"
+    timeout: 7200
+
+# ── NCCL Benchmark Configuration ──
+nccl_tests:
+  container_image: "nvcr.io/nvidia/pytorch:24.04-py3"
+  nccl_tests_path: "/opt/nccl_tests/build"      # Path inside container
+  message_sizes: "8 4G"                           # min max (swept automatically)
+  warmup_iters: 5
+  iters: 100
+  tests:
+    - name: "all_reduce_perf"
+      binary: "all_reduce_perf_mpi"
+      description: "AllReduce — primary multi-GPU bandwidth test"
+      expected_busbw_gbps: 380  # B200 NVLink 5 bidirectional
+    - name: "all_gather_perf"
+      binary: "all_gather_perf_mpi"
+      description: "AllGather — data distribution test"
+      expected_busbw_gbps: 350
+    - name: "reduce_scatter_perf"
+      binary: "reduce_scatter_perf_mpi"
+      description: "ReduceScatter — gradient reduction test"
+      expected_busbw_gbps: 350
+    - name: "sendrecv_perf"
+      binary: "sendrecv_perf_mpi"
+      description: "Send/Recv — point-to-point NVLink bandwidth"
+      expected_busbw_gbps: 200
+
+# ── HPL (High-Performance Linpack) Configuration ──
+hpl_config:
+  container_image: "nvcr.io/nvidia/hpc-benchmarks:24.03"
+  binary: "/workspace/hpl.sh"
+  problem_size: 200000       # N — matrix dimension
+  block_size: 1024           # NB
+  process_grid_p: 2          # P — process grid rows
+  process_grid_q: 4          # Q — process grid cols (P×Q = 8 GPUs)
+  timeout: 7200              # 2 hours max
+  expected_tflops: 60        # Per-node expected TFLOPS for B200
+
+# ── nvbandwidth Configuration ──
+nvbandwidth_config:
+  tests:
+    - "host_to_device_memcpy_ce"
+    - "device_to_host_memcpy_ce"
+    - "device_to_device_memcpy_read_ce"
+    - "device_to_device_memcpy_write_ce"
+    - "device_to_device_bidirectional_memcpy_read_ce"
+    - "device_to_device_bidirectional_memcpy_write_ce"
+    - "all_to_host_memcpy_ce"
+    - "all_to_one_write_ce"
+    - "one_to_all_write_ce"
+
+# ── NeMo / NeMoTron LLM Benchmark Configuration ──
+nemo_config:
+  container_image: "nvcr.io/nvidia/nemo:24.03.01"
+  nemotron_model: "nvidia/nemotron-3-8b-base-4k"
+  benchmark_scripts_path: "/opt/NeMo/examples/nlp/language_modeling"
+  # Single-node inference benchmark
+  inference_config:
+    model_size: "8b"
+    batch_sizes: [1, 2, 4, 8]
+    sequence_lengths: [512, 1024, 2048, 4096]
+    precision: "bf16"
+    timeout: 3600
+  # Single-node training throughput
+  training_config:
+    model_size: "8b"
+    micro_batch_size: 2
+    global_batch_size: 16
+    max_steps: 50
+    precision: "bf16"
+    tensor_parallel: 8       # TP=8 across 8 GPUs
+    timeout: 3600
+
+# ── Burn-In Suite — Test Selection ──
+# Controls which tests run in the combined burn-in suite
+burnin_default_tests:
+  - dcgmi_r3
+  - dcgmi_r4
+  - nccl_all_reduce
+  - nccl_all_gather
+  - nccl_reduce_scatter
+  - nvbandwidth
+  - hpl
+  - nemo_inference

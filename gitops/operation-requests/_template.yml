@@ -1,0 +1,58 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Operation Request Template
+# ═══════════════════════════════════════════════════════════════════
+# Copy this file, fill in the values, and submit a PR.
+# On PR merge, Ansible Tower will execute the operation.
+#
+# Available operations:
+#   Day 0:   day0_provision
+#   Day 2:   day2_reboot, day2_power, day2_cordon, day2_uncordon,
+#            day2_bcm_status, day2_gpu_reset, day2_ib_reset,
+#            day2_service_restart, firmware_check
+#   Debug:   debug_bundle, debug_nvsm_dump, debug_ib_diag,
+#            debug_gpu_diag, debug_logs
+#   Burn-In: burnin_dcgmi, burnin_nccl, burnin_hpl,
+#            burnin_nvbandwidth, burnin_nemo, burnin_suite
+# ═══════════════════════════════════════════════════════════════════
+
+# Required: Operation to perform
+operation: day2_reboot
+
+# Required: Target node(s) — list of hostnames
+targets:
+  - dgx-b200-042
+
+# Optional: Operation-specific parameters
+parameters:
+  reboot_type: graceful        # graceful | hard | ipmi
+  ticket_id: INC-12345         # Incident/ticket ID
+  # power_action: status       # status | on | off | reset
+  # bcm_status: UP             # UP | CLOSED
+  # reason_type: fault         # fault | maintenance | rma
+  # services:                  # List of services to restart
+  #   - nvidia-fabricmanager
+  #   - nvidia-dcgm
+  # upload_to_s3: true         # Upload debug bundle to S3
+  # update_firmware: false     # Apply firmware update
+  # ── Burn-In Parameters ──
+  # dcgmi_level: medium        # quick | medium | full (Level 1/3/4)
+  # nccl_test: all             # all | all_reduce | all_gather | reduce_scatter | sendrecv
+  # nemo_mode: inference       # inference | training | both
+  # skip_on_failure: false     # Stop burn-in suite on first failure
+  # tests:                     # Burn-in suite test selection
+  #   - dcgmi_r3
+  #   - dcgmi_r4
+  #   - nccl_all_reduce
+  #   - nvbandwidth
+  #   - hpl
+  #   - nemo_inference
+
+# Required: Who is requesting this operation
+requested_by: engineer@company.com
+
+# Filled by PR approver (do not fill yourself)
+approved_by: ""
+
+# Required: Reason for the operation
+reason: "Node shows GPU XID 79 errors — reboot to recover"

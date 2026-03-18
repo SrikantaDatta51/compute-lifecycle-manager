@@ -1,0 +1,143 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Burn-In — NeMo / NeMoTron LLM Benchmark
+# ═══════════════════════════════════════════════════════════════════
+# Runs NeMo-based LLM benchmarks to validate GPU compute + NVLink
+# under real AI workload conditions.
+#
+# Parameters:
+#   nemo_mode: inference | training | both (default: inference)
+
+- name: "Burn-In — NeMo / NeMoTron LLM Benchmark"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    nemo_mode: "{{ parameters.nemo_mode | default('inference') }}"
+    ticket_id: "{{ parameters.ticket_id | default('BURNIN') }}"
+
+  tasks:
+    - name: "Log NeMo benchmark configuration"
+      ansible.builtin.debug:
+        msg: |
+          ═══ NEMO LLM BENCHMARK ═══
+          Nodes:     {{ target_nodes | join(', ') }}
+          Mode:      {{ nemo_mode }}
+          Container: {{ nemo_config.container_image }}
+          Model:     {{ nemo_config.nemotron_model }}
+
+    - name: "Create NeMo inference benchmark script on head node"
+      ansible.builtin.copy:
+        dest: /tmp/nemo_inference_bench.py
+        mode: '0644'
+        content: |
+          import torch
+          import time
+          import sys
+
+          num_gpus = torch.cuda.device_count()
+          expected_gpus = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+          print(f"GPUs detected: {num_gpus}")
+          assert num_gpus == expected_gpus, f"Expected {expected_gpus} GPUs, found {num_gpus}"
+
+          results = []
+          for gpu_id in range(num_gpus):
+              torch.cuda.set_device(gpu_id)
+              device = torch.device(f"cuda:{gpu_id}")
+              a = torch.randn(4096, 4096, dtype=torch.bfloat16, device=device)
+              b = torch.randn(4096, 4096, dtype=torch.bfloat16, device=device)
+              for _ in range(5):
+                  c = torch.matmul(a, b)
+              torch.cuda.synchronize()
+              start = time.time()
+              for _ in range(100):
+                  c = torch.matmul(a, b)
+              torch.cuda.synchronize()
+              elapsed = time.time() - start
+              tflops = (2 * 4096**3 * 100) / (elapsed * 1e12)
+              results.append(tflops)
+              print(f"GPU {gpu_id}: {tflops:.1f} TFLOPS (bf16 matmul)")
+
+          avg = sum(results) / len(results)
+          print(f"\nAverage: {avg:.1f} TFLOPS across {num_gpus} GPUs")
+
+          if num_gpus > 1:
+              print("\n-- Multi-GPU tensor allocation test --")
+              tensors = []
+              for i in range(num_gpus):
+                  t = torch.ones(1024*1024, dtype=torch.bfloat16, device=f"cuda:{i}")
+                  tensors.append(t)
+              print(f"Multi-GPU allocation successful across {num_gpus} GPUs")
+
+          print("\nNeMo inference benchmark PASSED")
+      when: nemo_mode in ['inference', 'both']
+
+    - name: "Deploy inference script to target nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'mkdir -p /tmp/burnin'"
+        {{ cmsh_bin }} -c "device; use {{ item }}; scp /tmp/nemo_inference_bench.py /tmp/burnin/nemo_inference_bench.py"
+      loop: "{{ target_nodes }}"
+      when: nemo_mode in ['inference', 'both']
+      ignore_errors: true
+
+    - name: "Run NeMo inference benchmark"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/nemo"
+        mkdir -p "$OUTDIR"
+
+        echo "NeMo Inference Benchmark on $NODE"
+        echo "Started at $(date -Iseconds)"
+
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --shm-size=32g -v /tmp/burnin:/workspace/burnin {{ nemo_config.container_image }} python3 /workspace/burnin/nemo_inference_bench.py {{ gpu_count_per_node }} 2>&1'" > "$OUTDIR/nemo-inference-${TIMESTAMP}.txt" 2>&1
+
+        echo "Completed at $(date -Iseconds)"
+        cat "$OUTDIR/nemo-inference-${TIMESTAMP}.txt"
+
+        if grep -q "PASSED" "$OUTDIR/nemo-inference-${TIMESTAMP}.txt"; then
+          echo "RESULT: PASSED"
+        else
+          echo "RESULT: FAILED — check output"
+          exit 1
+        fi
+      loop: "{{ target_nodes }}"
+      register: nemo_inference
+      async: "{{ nemo_config.inference_config.timeout }}"
+      poll: 30
+      when: nemo_mode in ['inference', 'both']
+      ignore_errors: true
+
+    - name: "Run NeMo training throughput benchmark"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/nemo"
+        mkdir -p "$OUTDIR"
+
+        echo "NeMo Training Benchmark on $NODE"
+        echo "TP={{ nemo_config.training_config.tensor_parallel }}, MBS={{ nemo_config.training_config.micro_batch_size }}"
+        echo "Started at $(date -Iseconds)"
+
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --shm-size=32g {{ nemo_config.container_image }} python3 {{ nemo_config.benchmark_scripts_path }}/megatron_gpt_pretraining.py trainer.devices={{ gpu_count_per_node }} trainer.max_steps={{ nemo_config.training_config.max_steps }} trainer.precision={{ nemo_config.training_config.precision }} model.micro_batch_size={{ nemo_config.training_config.micro_batch_size }} model.global_batch_size={{ nemo_config.training_config.global_batch_size }} model.tensor_model_parallel_size={{ nemo_config.training_config.tensor_parallel }} model.encoder_seq_length=2048 model.hidden_size=4096 model.ffn_hidden_size=16384 model.num_layers=32 model.num_attention_heads=32 model.data.data_impl=mock +trainer.num_sanity_val_steps=0 exp_manager.create_wandb_logger=false exp_manager.create_checkpoint_callback=false 2>&1'" > "$OUTDIR/nemo-training-${TIMESTAMP}.txt" 2>&1
+
+        echo "Completed at $(date -Iseconds)"
+        tail -30 "$OUTDIR/nemo-training-${TIMESTAMP}.txt"
+      loop: "{{ target_nodes }}"
+      register: nemo_training
+      async: "{{ nemo_config.training_config.timeout }}"
+      poll: 30
+      when: nemo_mode in ['training', 'both']
+      ignore_errors: true
+
+    - name: "NeMo Results Summary"
+      ansible.builtin.debug:
+        msg: |
+          ═══ NEMO RESULTS ═══
+          Node: {{ item.item }}
+          Mode: {{ nemo_mode }}
+          Status: {{ '✅ COMPLETED' if item.rc == 0 else '⚠️ CHECK RESULTS' }}
+      loop: "{{ (nemo_inference.results | default([])) + (nemo_training.results | default([])) }}"
+      loop_control:
+        label: "{{ item.item | default('N/A') }}"
+      when: item.item is defined

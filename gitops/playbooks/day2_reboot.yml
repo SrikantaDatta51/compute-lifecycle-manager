@@ -1,0 +1,84 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — Node Reboot (Graceful / Hard / IPMI)
+# ═══════════════════════════════════════════════════════════════════
+# Reboots target nodes via BCM. Supports three modes:
+#   graceful — cmsh exec 'reboot' (OS-level)
+#   hard     — cmsh power reset
+#   ipmi     — ipmitool chassis power reset (out-of-band)
+
+- name: "Day 2 — Node Reboot"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    reboot_type: "{{ parameters.reboot_type | default('graceful') }}"
+    ticket_id: "{{ parameters.ticket_id | default('NO-TICKET') }}"
+
+  tasks:
+    - name: "Validate reboot type"
+      ansible.builtin.assert:
+        that: reboot_type in ['graceful', 'hard', 'ipmi']
+        fail_msg: "Invalid reboot_type '{{ reboot_type }}'. Must be: graceful, hard, or ipmi"
+
+    - name: "Log operation start"
+      ansible.builtin.debug:
+        msg: |
+          ═══ REBOOT OPERATION ═══
+          Nodes:  {{ target_nodes | join(', ') }}
+          Type:   {{ reboot_type }}
+          Ticket: {{ ticket_id }}
+          Time:   {{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -Iseconds')) }}
+
+    - name: "Graceful reboot via cmsh exec"
+      ansible.builtin.shell: |
+        echo "Rebooting {{ item }} (graceful)..."
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'reboot'"
+      loop: "{{ target_nodes }}"
+      when: reboot_type == 'graceful'
+
+    - name: "Hard reboot via cmsh power reset"
+      ansible.builtin.shell: |
+        echo "Rebooting {{ item }} (hard power reset)..."
+        {{ cmsh_bin }} -c "device; use {{ item }}; power reset"
+      loop: "{{ target_nodes }}"
+      when: reboot_type == 'hard'
+
+    - name: "IPMI reboot via ipmitool"
+      ansible.builtin.shell: |
+        BMC_IP=$({{ cmsh_bin }} -c "device; use {{ item }}; get bmcipaddress" 2>/dev/null | tail -1 | tr -d '[:space:]')
+        echo "Rebooting {{ item }} via IPMI (BMC: $BMC_IP)..."
+        {{ ipmitool_bin }} -H "$BMC_IP" -U admin -P "{{ bmc_password | default('admin') }}" chassis power reset
+      loop: "{{ target_nodes }}"
+      when: reboot_type == 'ipmi'
+
+    - name: "Wait for nodes to come back online (max 10 min)"
+      ansible.builtin.shell: |
+        for i in $(seq 1 20); do
+          STATUS=$({{ cmsh_bin }} -c "device; use {{ item }}; get status" 2>/dev/null | tail -1)
+          if echo "$STATUS" | grep -qi "UP"; then
+            echo "{{ item }} is UP after reboot"
+            exit 0
+          fi
+          echo "Waiting for {{ item }}... attempt $i/20 (status: $STATUS)"
+          sleep 30
+        done
+        echo "TIMEOUT waiting for {{ item }}"
+        exit 1
+      loop: "{{ target_nodes }}"
+      async: 600
+      poll: 30
+
+    - name: "Verify nodes post-reboot"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get status"
+      loop: "{{ target_nodes }}"
+      register: post_reboot_status
+      changed_when: false
+
+    - name: "Report results"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | trim }}"
+      loop: "{{ post_reboot_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"

@@ -1,0 +1,26 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Debug — Full NVIDIA Debug Bundle (All Diagnostics + S3 Upload)
+# ═══════════════════════════════════════════════════════════════════
+# Collects GPU, IB, NVSM, system logs, and firmware info.
+# Tars everything, uploads to S3, generates download URL.
+
+- name: "Debug — Full NVIDIA Debug Bundle"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    ticket_id: "{{ parameters.ticket_id | default('NO-TICKET') }}"
+    categories: ['gpu', 'ib', 'nvsm', 'system', 'firmware']
+    upload_to_s3: true
+  pre_tasks:
+    - name: "Log bundle collection start"
+      ansible.builtin.debug:
+        msg: |
+          ═══ NVIDIA DEBUG BUNDLE COLLECTION ═══
+          Nodes:      {{ target_nodes | join(', ') }}
+          Categories: {{ categories | join(', ') }}
+          Ticket:     {{ ticket_id }}
+          S3 Upload:  {{ upload_to_s3 }}
+  roles:
+    - bcm_debug_bundle

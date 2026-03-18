@@ -1,0 +1,35 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — InfiniBand Link Reset & Counter Clear
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — IB Link Reset"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+
+  tasks:
+    - name: "Reset IB error counters"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'perfquery -x -R 2>/dev/null || echo no-perfquery'"
+      loop: "{{ target_nodes }}"
+
+    - name: "Verify IB port states"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        echo "── IB Status: $NODE ──"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'ibstat 2>/dev/null | grep -E \"State|Physical|Rate|Port GUID\"'"
+        echo ""
+        echo "Error counters:"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'perfquery -x 2>/dev/null | grep -E \"SymbolError|LinkRecover|LinkDowned|RcvErr|XmtDiscard\"'"
+      loop: "{{ target_nodes }}"
+      register: ib_status
+      changed_when: false
+
+    - name: "Report IB status"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ ib_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"

@@ -1,0 +1,10 @@
+---
+operation: debug_bundle
+targets:
+  - dgx-b200-015
+parameters:
+  ticket_id: NV-CASE-44210
+  upload_to_s3: true
+requested_by: oncall-l1@company.com
+approved_by: ""
+reason: "NVIDIA support requested full debug bundle for case NV-CASE-44210 — GPU DBE errors"

@@ -1,0 +1,42 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — Service Restart
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — Service Restart"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    services: "{{ parameters.services | default(gpu_services) }}"
+
+  tasks:
+    - name: "Restart services on target nodes"
+      ansible.builtin.shell: |
+        echo "Restarting {{ svc }} on {{ node }}..."
+        {{ cmsh_bin }} -c "device; use {{ node }}; exec 'systemctl restart {{ svc }}'"
+      loop: "{{ target_nodes | product(services) | list }}"
+      vars:
+        node: "{{ item[0] }}"
+        svc: "{{ item[1] }}"
+      loop_control:
+        label: "{{ item[0] }} → {{ item[1] }}"
+
+    - name: "Verify service states"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        echo "── Services: $NODE ──"
+        {% for svc in services %}
+        STATUS=$({{ cmsh_bin }} -c "device; use $NODE; exec 'systemctl is-active {{ svc }}'" | tail -1)
+        echo "  {{ svc }}: $STATUS"
+        {% endfor %}
+      loop: "{{ target_nodes }}"
+      register: svc_verify
+      changed_when: false
+
+    - name: "Report"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ svc_verify.results }}"
+      loop_control:
+        label: "{{ item.item }}"

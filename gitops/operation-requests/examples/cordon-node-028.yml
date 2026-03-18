@@ -1,0 +1,10 @@
+---
+operation: day2_cordon
+targets:
+  - dgx-b200-028
+parameters:
+  ticket_id: INC-8034
+  reason_type: fault
+requested_by: oncall-l1@company.com
+approved_by: ""
+reason: "IB link flapping detected on node 028 — cordoning for investigation"

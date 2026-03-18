@@ -1,0 +1,10 @@
+---
+operation: day2_reboot
+targets:
+  - dgx-b200-042
+parameters:
+  reboot_type: graceful
+  ticket_id: INC-7821
+requested_by: oncall-l1@company.com
+approved_by: ""
+reason: "Node unresponsive after GPU XID 79 — graceful reboot to recover"

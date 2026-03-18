@@ -1,0 +1,39 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — Power Management (On / Off / Reset / Status)
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — Power Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    power_action: "{{ parameters.power_action | default('status') }}"
+    ticket_id: "{{ parameters.ticket_id | default('NO-TICKET') }}"
+
+  tasks:
+    - name: "Validate power action"
+      ansible.builtin.assert:
+        that: power_action in ['status', 'on', 'off', 'reset']
+        fail_msg: "Invalid power_action '{{ power_action }}'. Must be: status, on, off, or reset"
+
+    - name: "Execute power {{ power_action }}"
+      ansible.builtin.shell: |
+        echo "Power {{ power_action }} on {{ item }} (ticket: {{ ticket_id }})"
+        {{ cmsh_bin }} -c "device; use {{ item }}; power {{ power_action }}"
+      loop: "{{ target_nodes }}"
+      register: power_result
+
+    - name: "Verify power state"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; power status"
+      loop: "{{ target_nodes }}"
+      register: power_verify
+      changed_when: false
+
+    - name: "Report power state"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | trim }}"
+      loop: "{{ power_verify.results }}"
+      loop_control:
+        label: "{{ item.item }}"

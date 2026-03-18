@@ -1,0 +1,225 @@
+# Node State Machine Configuration — 11 States
+# NLM Controller v2.0
+
+states:
+  provisioning:
+    description: "OS imaging via PXE, BCM, or MAAS"
+    tests: false
+    customer: false
+    timeout_hours: 4
+    timeout_target: scheduled_maintenance
+
+  burn_in:
+    description: "Day-0 extended stress test (48 hr)"
+    tests: true
+    customer: false
+    timeout_hours: 72
+    timeout_target: scheduled_maintenance
+
+  testing:
+    description: "Day-2 recertification (daily L1 pulse)"
+    tests: true
+    customer: false
+    timeout_hours: 8
+    timeout_target: scheduled_maintenance
+
+  certified_ready:
+    description: "All tests passed, available for assignment"
+    tests: false
+    customer: false
+
+  customer_assigned:
+    description: "Running tenant workloads — PROTECTED"
+    tests: false
+    customer: true
+
+  draining:
+    description: "Graceful workload migration before maintenance"
+    tests: false
+    customer: migrating
+    timeout_hours: 2
+    timeout_target: emergency_drain
+
+  emergency_drain:
+    description: "Critical HW risk, forced rapid drain"
+    tests: false
+    customer: force
+    timeout_hours: 0.5
+    timeout_target: repair
+
+  scheduled_maintenance:
+    description: "Planned maintenance window"
+    tests: false
+    customer: false
+
+  repair:
+    description: "Active SW/FW remediation"
+    tests: false
+    customer: false
+
+  rma:
+    description: "Awaiting hardware replacement (DC Infra owns)"
+    tests: false
+    customer: false
+
+  decommissioned:
+    description: "End of life — terminal state"
+    tests: false
+    customer: false
+
+transitions:
+  - from: provisioning
+    trigger: provision_complete
+    to: burn_in
+    owner: nlm-controller
+    priority: P0
+    actions: [start_burn_in]
+    alert: false
+
+  - from: provisioning
+    trigger: provision_timeout
+    to: scheduled_maintenance
+    owner: nlm-controller
+    priority: P0
+    alert: true
+
+  - from: burn_in
+    trigger: burn_in_pass
+    to: certified_ready
+    owner: nlm-controller
+    priority: P0
+    actions: [record_certification]
+    alert: false
+
+  - from: burn_in
+    trigger: burn_in_fail
+    to: repair
+    owner: nlm-controller
+    priority: P0
+    actions: [create_repair_ticket]
+    alert: true
+
+  - from: testing
+    trigger: l1_pass
+    to: certified_ready
+    owner: nlm-controller
+    priority: P0
+    actions: [record_certification]
+    alert: false
+
+  - from: testing
+    trigger: l1_fail
+    to: repair
+    owner: nlm-controller
+    priority: P0
+    actions: [create_repair_ticket]
+    alert: true
+
+  - from: certified_ready
+    trigger: customer_assign
+    to: customer_assigned
+    owner: customer-eng
+    priority: P4
+    alert: false
+
+  - from: certified_ready
+    trigger: testing_scheduled
+    to: testing
+    owner: nlm-controller
+    priority: P0
+    alert: false
+
+  - from: customer_assigned
+    trigger: drain_request
+    to: draining
+    owner: customer-team
+    priority: P4
+    actions: [notify_customer]
+    alert: true
+
+  - from: customer_assigned
+    trigger: emergency_hw
+    to: emergency_drain
+    owner: nlm-controller
+    priority: P0
+    actions: [notify_customer, emergency_alert]
+    alert: true
+
+  - from: draining
+    trigger: drain_complete
+    to: scheduled_maintenance
+    owner: k8s-platform
+    priority: P2
+    alert: false
+
+  - from: draining
+    trigger: drain_timeout
+    to: emergency_drain
+    owner: nlm-controller
+    priority: P0
+    alert: true
+
+  - from: emergency_drain
+    trigger: drain_complete
+    to: repair
+    owner: nlm-controller
+    priority: P0
+    alert: false
+
+  - from: scheduled_maintenance
+    trigger: repair_start
+    to: repair
+    owner: partner-teams
+    priority: P3
+    alert: false
+
+  - from: scheduled_maintenance
+    trigger: testing_scheduled
+    to: testing
+    owner: nlm-controller
+    priority: P0
+    alert: false
+
+  - from: repair
+    trigger: repair_complete
+    to: testing
+    owner: partner-teams
+    priority: P3
+    alert: false
+
+  - from: repair
+    trigger: rma_needed
+    to: rma
+    owner: nlm-controller
+    priority: P0
+    actions: [create_rma_ticket]
+    alert: true
+
+  - from: rma
+    trigger: rma_complete
+    to: provisioning
+    owner: dc-infra
+    priority: P3
+    actions: [start_provisioning]
+    alert: false
+
+  - from: certified_ready
+    trigger: decommission
+    to: decommissioned
+    owner: dc-infra
+    priority: P0
+    alert: true
+
+  - from: repair
+    trigger: decommission
+    to: decommissioned
+    owner: dc-infra
+    priority: P0
+    alert: true
+
+  - from: rma
+    trigger: decommission
+    to: decommissioned
+    owner: dc-infra
+    priority: P0
+    alert: true

@@ -1,0 +1,10 @@
+apiVersion: nlm.cic.io/v1
+kind: NodeState
+metadata:
+  name: node-2
+  labels: {}
+  updated_at: '2026-03-14T09:06:17.134122+00:00'
+  updated_by: nlm-controller
+spec:
+  desired_state: testing
+  tenant: ''

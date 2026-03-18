@@ -1,0 +1,8 @@
+operation: debug_bundle
+targets:
+- cpu-kr1b-001
+parameters:
+  upload_to_s3: true
+requested_by: nlm-maintenance@nlm.cic.io
+approved_by: nlm-maintenance@nlm.cic.io
+reason: Pre-repair log collection

@@ -1,0 +1,14 @@
+operation: day2_cordon
+targets:
+- gpu-b200-009
+parameters:
+  reason_type: fault
+  ticket_id: NLM-gpu-b200
+requested_by: nlm-reconciler@nlm.cic.io
+approved_by: nlm-reconciler@nlm.cic.io
+reason: 'Auto: hw_gpu_contained (health=0.30)'
+nlm_metadata:
+  classification: hw_gpu_contained
+  confidence: 0.9
+  severity: high
+  priority: P0

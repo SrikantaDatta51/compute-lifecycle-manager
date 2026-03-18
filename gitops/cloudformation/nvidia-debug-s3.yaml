@@ -1,0 +1,181 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  NVIDIA Debug Bundle S3 Infrastructure
+  Creates an S3 bucket for storing NVIDIA debug bundles collected from
+  DGX B200 nodes via BCM Ansible GitOps pipeline. Includes lifecycle
+  rules, encryption, and IAM roles for upload/download.
+
+Parameters:
+  BucketPrefix:
+    Type: String
+    Default: nvidia-debug-bundles
+    Description: Prefix for the S3 bucket name (AccountId is appended)
+
+  RetentionDays:
+    Type: Number
+    Default: 365
+    Description: Days before debug bundles are permanently deleted
+
+  GlacierTransitionDays:
+    Type: Number
+    Default: 90
+    Description: Days before bundles transition to Glacier storage
+
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production, staging, development]
+
+Resources:
+  # ═══ S3 Bucket ═══
+  DebugBundleBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub '${BucketPrefix}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Prefix: bundles/
+            Transitions:
+              - TransitionInDays: !Ref GlacierTransitionDays
+                StorageClass: GLACIER
+            ExpirationInDays: !Ref RetentionDays
+          - Id: CleanupIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: Project
+          Value: bcm-ansible-gitops
+        - Key: Purpose
+          Value: nvidia-debug-bundles
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ═══ IAM Role for BCM Head Node ═══
+  HeadNodeUploadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'bcm-debug-bundle-upload-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+          # Allow assuming from any authenticated user (for on-prem head nodes)
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DebugBundleUploadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Upload bundles
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectTagging
+                Resource: !Sub '${DebugBundleBucket.Arn}/bundles/*'
+              # Generate presigned URLs for download
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${DebugBundleBucket.Arn}/bundles/*'
+              # List bundles
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt DebugBundleBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: 'bundles/*'
+
+  # ═══ IAM Instance Profile (for EC2-based head nodes) ═══
+  HeadNodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub 'bcm-debug-bundle-profile-${Environment}'
+      Roles:
+        - !Ref HeadNodeUploadRole
+
+  # ═══ IAM User for non-EC2 head nodes (on-prem) ═══
+  UploadUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub 'bcm-debug-uploader-${Environment}'
+      Policies:
+        - PolicyName: DebugBundleAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DebugBundleBucket.Arn
+                  - !Sub '${DebugBundleBucket.Arn}/*'
+
+  UploadUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref UploadUser
+
+Outputs:
+  BucketName:
+    Description: S3 bucket name for debug bundles
+    Value: !Ref DebugBundleBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+
+  BucketArn:
+    Description: S3 bucket ARN
+    Value: !GetAtt DebugBundleBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+
+  UploadRoleArn:
+    Description: IAM role ARN for head node upload
+    Value: !GetAtt HeadNodeUploadRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-UploadRoleArn'
+
+  InstanceProfileArn:
+    Description: Instance profile ARN (attach to EC2 head node)
+    Value: !GetAtt HeadNodeInstanceProfile.Arn
+
+  UploadUserAccessKeyId:
+    Description: Access Key ID for on-prem head node (store securely)
+    Value: !Ref UploadUserAccessKey
+
+  UploadUserSecretKey:
+    Description: Secret Access Key (store in Ansible Vault or Secrets Manager)
+    Value: !GetAtt UploadUserAccessKey.SecretAccessKey
+
+  ExampleUploadCommand:
+    Description: Example AWS CLI command to upload a bundle
+    Value: !Sub |
+      aws s3 cp nvidia-debug-bundle.tar.gz s3://${DebugBundleBucket}/bundles/<node>/<timestamp>/ --region ${AWS::Region}
+
+  ExamplePresignCommand:
+    Description: Example AWS CLI command to generate download URL
+    Value: !Sub |
+      aws s3 presign s3://${DebugBundleBucket}/bundles/<node>/<ts>/nvidia-debug-bundle.tar.gz --expires-in 86400

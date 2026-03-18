@@ -1,0 +1,75 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — Uncordon Node (BCM UP + Slurm RESUME)
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — Uncordon Node"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    ticket_id: "{{ parameters.ticket_id | default('NO-TICKET') }}"
+
+  tasks:
+    - name: "Run sanity check before uncordoning"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        PASS=0; FAIL=0
+        echo "── Pre-Uncordon Sanity: $NODE ──"
+
+        GPU=$({{ cmsh_bin }} -c "device; use $NODE; exec 'nvidia-smi -L 2>/dev/null | wc -l'" | tail -1)
+        [ "$GPU" = "{{ gpu_count_per_node }}" ] && PASS=$((PASS+1)) && echo "  ✅ GPUs: $GPU" || { FAIL=$((FAIL+1)); echo "  ❌ GPUs: $GPU"; }
+
+        FM=$({{ cmsh_bin }} -c "device; use $NODE; exec 'systemctl is-active nvidia-fabricmanager'" | tail -1)
+        [ "$FM" = "active" ] && PASS=$((PASS+1)) && echo "  ✅ FabricManager" || { FAIL=$((FAIL+1)); echo "  ❌ FabricManager: $FM"; }
+
+        DCGM=$({{ cmsh_bin }} -c "device; use $NODE; exec 'systemctl is-active nvidia-dcgm'" | tail -1)
+        [ "$DCGM" = "active" ] && PASS=$((PASS+1)) && echo "  ✅ DCGM" || { FAIL=$((FAIL+1)); echo "  ❌ DCGM: $DCGM"; }
+
+        IB=$({{ cmsh_bin }} -c "device; use $NODE; exec 'ibstat 2>/dev/null | grep -c \"State: Active\"'" | tail -1)
+        [ "$IB" -ge 1 ] 2>/dev/null && PASS=$((PASS+1)) && echo "  ✅ IB ports: $IB" || { FAIL=$((FAIL+1)); echo "  ❌ IB ports: $IB"; }
+
+        XID=$({{ cmsh_bin }} -c "device; use $NODE; exec 'dmesg 2>/dev/null | grep -ci xid'" | tail -1)
+        [ "$XID" = "0" ] && PASS=$((PASS+1)) && echo "  ✅ No XID errors" || { FAIL=$((FAIL+1)); echo "  ⚠️ XID errors: $XID"; }
+
+        echo "── Results: $PASS passed, $FAIL failed ──"
+        [ "$FAIL" -eq 0 ]
+      loop: "{{ target_nodes }}"
+      register: sanity_check
+      failed_when: false
+
+    - name: "Set BCM status to UP"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; set status UP; commit"
+      loop: "{{ target_nodes }}"
+      when: sanity_check is succeeded
+
+    - name: "Resume node in Slurm"
+      ansible.builtin.shell: |
+        scontrol update NodeName={{ item }} State=RESUME
+      loop: "{{ target_nodes }}"
+      when: sanity_check is not failed
+      failed_when: false
+
+    - name: "Verify uncordon state"
+      ansible.builtin.shell: |
+        echo "── {{ item }} ──"
+        echo "Slurm: $(sinfo -N -n {{ item }} -l 2>/dev/null | tail -1)"
+        echo "BCM:   $({{ cmsh_bin }} -c 'device; use {{ item }}; get status' 2>/dev/null | tail -1)"
+      loop: "{{ target_nodes }}"
+      register: verify_uncordon
+      changed_when: false
+
+    - name: "Fleet health check"
+      ansible.builtin.shell: |
+        DRAIN_COUNT=$(sinfo -N -l 2>/dev/null | grep -c drain)
+        echo "Current drain count: $DRAIN_COUNT (target: {{ buffer_nodes }})"
+        [ "$DRAIN_COUNT" -le "{{ buffer_nodes }}" ] && echo "✅ Fleet healthy" || echo "⚠️ $DRAIN_COUNT nodes still drained"
+      changed_when: false
+
+    - name: "Report results"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ verify_uncordon.results }}"
+      loop_control:
+        label: "{{ item.item }}"

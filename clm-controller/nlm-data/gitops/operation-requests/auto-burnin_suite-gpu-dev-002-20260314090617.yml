@@ -1,0 +1,16 @@
+operation: burnin_suite
+targets:
+- gpu-dev-002
+parameters:
+  dcgmi_level: medium
+  nccl_test: all_reduce
+  tests:
+  - dcgmi_r3
+  - nccl_all_reduce
+  - nvbandwidth
+  skip_on_failure: false
+requested_by: nlm-testing@nlm.cic.io
+approved_by: nlm-testing@nlm.cic.io
+reason: Daily L1 certification (cert stale >24hr)
+nlm_metadata:
+  state_transition: "certified_ready \u2192 testing"

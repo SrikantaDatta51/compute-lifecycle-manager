@@ -1,0 +1,116 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Burn-In — DCGMI Diagnostics (Level 1 / 3 / 4)
+# ═══════════════════════════════════════════════════════════════════
+# DCGMI diagnostic levels:
+#   Level 1 (quick):  ~2 min  — basic health check
+#   Level 3 (medium): ~15 min — stress, PCIe, memory bandwidth
+#   Level 4 (full):   ~90 min — everything + NVLink, NVSWITCH, ECC
+#
+# Parameters:
+#   dcgmi_level: quick | medium | full (default: medium)
+
+- name: "Burn-In — DCGMI Diagnostics"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    dcgmi_level: "{{ parameters.dcgmi_level | default('medium') }}"
+    ticket_id: "{{ parameters.ticket_id | default('BURNIN') }}"
+
+  tasks:
+    - name: "Validate DCGMI level"
+      ansible.builtin.assert:
+        that: dcgmi_level in ['quick', 'medium', 'full']
+        fail_msg: "Invalid dcgmi_level '{{ dcgmi_level }}'. Must be: quick, medium, or full"
+
+    - name: "Get level configuration"
+      ansible.builtin.set_fact:
+        diag_level: "{{ dcgmi_levels[dcgmi_level].level }}"
+        diag_timeout: "{{ dcgmi_levels[dcgmi_level].timeout }}"
+        diag_description: "{{ dcgmi_levels[dcgmi_level].description }}"
+
+    - name: "Log DCGMI diagnostic start"
+      ansible.builtin.debug:
+        msg: |
+          ═══ DCGMI DIAGNOSTICS ═══
+          Nodes:       {{ target_nodes | join(', ') }}
+          Level:       {{ dcgmi_level }} (dcgmi diag -r {{ diag_level }})
+          Description: {{ diag_description }}
+          Timeout:     {{ diag_timeout }}s
+          Ticket:      {{ ticket_id }}
+
+    - name: "Pre-check — verify DCGM is running"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'systemctl is-active nvidia-dcgm'" | tail -1
+      loop: "{{ target_nodes }}"
+      register: dcgm_check
+      changed_when: false
+
+    - name: "Start DCGM if not running"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item.item }}; exec 'systemctl start nvidia-dcgm'"
+      loop: "{{ dcgm_check.results }}"
+      when: item.stdout | trim != 'active'
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "Run DCGMI diag -r {{ diag_level }}"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/dcgmi"
+        mkdir -p "$OUTDIR"
+
+        echo "═══ DCGMI Level {{ diag_level }} on $NODE ═══"
+        echo "Started: $(date -Iseconds)"
+
+        # Run diagnostic with JSON output
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'dcgmi diag -r {{ diag_level }} -j'" \
+          > "$OUTDIR/dcgmi-r{{ diag_level }}-${TIMESTAMP}.json" 2>&1
+
+        EXIT_CODE=$?
+
+        # Also capture human-readable output
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'dcgmi diag -r {{ diag_level }}'" \
+          > "$OUTDIR/dcgmi-r{{ diag_level }}-${TIMESTAMP}.txt" 2>&1
+
+        echo "Completed: $(date -Iseconds)"
+        echo "Exit code: $EXIT_CODE"
+
+        # Parse results
+        cat "$OUTDIR/dcgmi-r{{ diag_level }}-${TIMESTAMP}.txt"
+
+        # Check for failures
+        if grep -qi "FAIL\|ERROR" "$OUTDIR/dcgmi-r{{ diag_level }}-${TIMESTAMP}.txt"; then
+          echo ""
+          echo "❌ DCGMI Level {{ diag_level }} FAILED on $NODE"
+          echo "Details saved: $OUTDIR/dcgmi-r{{ diag_level }}-${TIMESTAMP}.txt"
+          exit 1
+        else
+          echo ""
+          echo "✅ DCGMI Level {{ diag_level }} PASSED on $NODE"
+        fi
+      loop: "{{ target_nodes }}"
+      register: dcgmi_result
+      async: "{{ diag_timeout | int }}"
+      poll: 30
+      ignore_errors: true
+
+    - name: "Collect ECC errors post-diagnostic"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'nvidia-smi -q -d ECC 2>/dev/null | grep -A5 Volatile'"
+      loop: "{{ target_nodes }}"
+      register: ecc_post
+      changed_when: false
+
+    - name: "Report DCGMI results"
+      ansible.builtin.debug:
+        msg: |
+          ═══ DCGMI RESULTS SUMMARY ═══
+          Node:   {{ item.item }}
+          Level:  {{ dcgmi_level }} (r{{ diag_level }})
+          Status: {{ '✅ PASSED' if item.rc == 0 else '❌ FAILED' }}
+      loop: "{{ dcgmi_result.results }}"
+      loop_control:
+        label: "{{ item.item }}"

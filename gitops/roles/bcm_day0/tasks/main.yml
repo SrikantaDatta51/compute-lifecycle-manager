@@ -1,0 +1,97 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Day 0 — Node Provisioning & Initial Setup
+# ═══════════════════════════════════════════════════════════════════
+# Runs on BCM head node, uses cmsh to provision target nodes.
+#
+# Usage (via operation request YAML):
+#   operation: day0_provision
+#   targets: [dgx-b200-065]
+#   parameters:
+#     image_profile: dgx-b200-ubuntu2204
+#     category: dgx-gpu-nodes
+
+- name: "Verify node exists in BCM"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; list" | grep -q "{{ item }}"
+  loop: "{{ target_nodes }}"
+  register: node_exists
+  changed_when: false
+
+- name: "Set image profile on target nodes"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; set imageprofile {{ image_profile | default('default') }}; commit"
+  loop: "{{ target_nodes }}"
+  register: set_image
+  changed_when: "'successfully' in set_image.stdout or set_image.rc == 0"
+
+- name: "Set node category"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; set category {{ category | default('dgx-gpu-nodes') }}; commit"
+  loop: "{{ target_nodes }}"
+  when: category is defined
+
+- name: "Set node status to INSTALL"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; set status INSTALL; commit"
+  loop: "{{ target_nodes }}"
+
+- name: "Trigger node provisioning (PXE boot)"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; power reset"
+  loop: "{{ target_nodes }}"
+
+- name: "Wait for provisioning to complete (max 30 min)"
+  ansible.builtin.shell: |
+    for i in $(seq 1 60); do
+      STATUS=$({{ cmsh_bin }} -c "device; use {{ item }}; get provisioningstatus" 2>/dev/null | tail -1)
+      echo "Attempt $i/60: $STATUS"
+      if echo "$STATUS" | grep -qi "provisioned\|up\|installed"; then
+        echo "PROVISIONED"
+        exit 0
+      fi
+      sleep 30
+    done
+    echo "TIMEOUT"
+    exit 1
+  loop: "{{ target_nodes }}"
+  register: provision_wait
+  async: 1800
+  poll: 30
+
+- name: "Set node status to UP after provisioning"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; set status UP; commit"
+  loop: "{{ target_nodes }}"
+  when: provision_wait is succeeded
+
+- name: "Run initial sanity check"
+  ansible.builtin.shell: |
+    NODE="{{ item }}"
+    PASS=0; FAIL=0
+    echo "── SANITY: $NODE ──"
+
+    GPU_COUNT=$({{ cmsh_bin }} -c "device; use $NODE; exec 'nvidia-smi -L 2>/dev/null | wc -l'" | tail -1)
+    [ "$GPU_COUNT" = "{{ gpu_count_per_node }}" ] && echo "  ✅ GPU count: $GPU_COUNT" && PASS=$((PASS+1)) || { echo "  ❌ GPU count: $GPU_COUNT (expected {{ gpu_count_per_node }})"; FAIL=$((FAIL+1)); }
+
+    FM=$({{ cmsh_bin }} -c "device; use $NODE; exec 'systemctl is-active nvidia-fabricmanager'" | tail -1)
+    [ "$FM" = "active" ] && echo "  ✅ FabricManager: active" && PASS=$((PASS+1)) || { echo "  ❌ FabricManager: $FM"; FAIL=$((FAIL+1)); }
+
+    DCGM=$({{ cmsh_bin }} -c "device; use $NODE; exec 'systemctl is-active nvidia-dcgm'" | tail -1)
+    [ "$DCGM" = "active" ] && echo "  ✅ DCGM: active" && PASS=$((PASS+1)) || { echo "  ❌ DCGM: $DCGM"; FAIL=$((FAIL+1)); }
+
+    IB=$({{ cmsh_bin }} -c "device; use $NODE; exec 'ibstat 2>/dev/null | grep -c \"State: Active\"'" | tail -1)
+    [ "$IB" -ge 1 ] 2>/dev/null && echo "  ✅ IB Active ports: $IB" && PASS=$((PASS+1)) || { echo "  ❌ IB Active ports: $IB"; FAIL=$((FAIL+1)); }
+
+    echo "── Results: $PASS passed, $FAIL failed ──"
+    [ "$FAIL" -eq 0 ]
+  loop: "{{ target_nodes }}"
+  register: sanity_result
+
+- name: "Report Day 0 provisioning result"
+  ansible.builtin.debug:
+    msg: |
+      ═══ Day 0 Provisioning Complete ═══
+      Nodes: {{ target_nodes | join(', ') }}
+      Image: {{ image_profile | default('default') }}
+      Status: {{ 'ALL PASSED ✅' if sanity_result is succeeded else 'FAILURES DETECTED ❌' }}

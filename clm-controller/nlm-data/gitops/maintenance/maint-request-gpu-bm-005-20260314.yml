@@ -1,0 +1,12 @@
+operation: maintenance_request
+targets:
+- gpu-bm-005
+parameters:
+  issue: "net_transceiver: IB CRC > 1000/hr \u2014 likely transceiver"
+  severity: high
+  recommended_window: ''
+requested_by: nlm-reconciler@nlm.cic.io
+approved_by: ''
+reason: "net_transceiver: IB CRC > 1000/hr \u2014 likely transceiver"
+tenant: unknown
+status: awaiting_customer_approval

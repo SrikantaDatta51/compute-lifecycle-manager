@@ -1,0 +1,10 @@
+apiVersion: nlm.cic.io/v1
+kind: Cordon
+metadata:
+  name: gpu-b200-009
+  created_at: '2026-03-14T09:27:09.268828+00:00'
+  created_by: nlm-controller
+spec:
+  owner: nlm-reconciler
+  priority: P0
+  reason: 'hw_gpu_contained: Contained ECC (driver reset may fix)'

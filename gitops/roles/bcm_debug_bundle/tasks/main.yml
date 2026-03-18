@@ -1,0 +1,125 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Debug Bundle — Collect, Tar, Upload to S3
+# ═══════════════════════════════════════════════════════════════════
+# Collects comprehensive NVIDIA diagnostics from target nodes via cmsh,
+# creates a timestamped tar.gz, saves to CM shared, uploads to S3,
+# and generates a presigned download URL.
+
+- name: "Set bundle metadata"
+  ansible.builtin.set_fact:
+    bundle_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+    bundle_categories: "{{ categories | default(['gpu', 'ib', 'nvsm', 'system', 'firmware']) }}"
+
+- name: "Create bundle output directories"
+  ansible.builtin.file:
+    path: "{{ debug_bundle_dir }}/{{ item }}/{{ bundle_timestamp }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ target_nodes }}"
+
+- name: "Collect diagnostics — GPU"
+  ansible.builtin.shell: |
+    NODE="{{ item.0 }}"
+    CMD_NAME="{{ item.1.name }}"
+    CMD="{{ item.1.cmd }}"
+    OUTDIR="{{ debug_bundle_dir }}/$NODE/{{ bundle_timestamp }}"
+    echo "Collecting $CMD_NAME from $NODE..."
+    {{ cmsh_bin }} -c "device; use $NODE; exec '$CMD'" > "$OUTDIR/${CMD_NAME}.txt" 2>&1
+    echo "OK: $CMD_NAME → $OUTDIR/${CMD_NAME}.txt"
+  loop: "{{ target_nodes | product(debug_commands.gpu) | list }}"
+  loop_control:
+    label: "{{ item.0 }} → {{ item.1.name }}"
+  when: "'gpu' in bundle_categories"
+  ignore_errors: true
+
+- name: "Collect diagnostics — InfiniBand"
+  ansible.builtin.shell: |
+    NODE="{{ item.0 }}"
+    CMD_NAME="{{ item.1.name }}"
+    CMD="{{ item.1.cmd }}"
+    OUTDIR="{{ debug_bundle_dir }}/$NODE/{{ bundle_timestamp }}"
+    {{ cmsh_bin }} -c "device; use $NODE; exec '$CMD'" > "$OUTDIR/${CMD_NAME}.txt" 2>&1
+  loop: "{{ target_nodes | product(debug_commands.ib) | list }}"
+  loop_control:
+    label: "{{ item.0 }} → {{ item.1.name }}"
+  when: "'ib' in bundle_categories"
+  ignore_errors: true
+
+- name: "Collect diagnostics — NVSM"
+  ansible.builtin.shell: |
+    NODE="{{ item.0 }}"
+    CMD_NAME="{{ item.1.name }}"
+    CMD="{{ item.1.cmd }}"
+    OUTDIR="{{ debug_bundle_dir }}/$NODE/{{ bundle_timestamp }}"
+    {{ cmsh_bin }} -c "device; use $NODE; exec '$CMD'" > "$OUTDIR/${CMD_NAME}.txt" 2>&1
+  loop: "{{ target_nodes | product(debug_commands.nvsm) | list }}"
+  loop_control:
+    label: "{{ item.0 }} → {{ item.1.name }}"
+  when: "'nvsm' in bundle_categories"
+  ignore_errors: true
+
+- name: "Collect diagnostics — System & Kernel Logs"
+  ansible.builtin.shell: |
+    NODE="{{ item.0 }}"
+    CMD_NAME="{{ item.1.name }}"
+    CMD="{{ item.1.cmd }}"
+    OUTDIR="{{ debug_bundle_dir }}/$NODE/{{ bundle_timestamp }}"
+    {{ cmsh_bin }} -c "device; use $NODE; exec '$CMD'" > "$OUTDIR/${CMD_NAME}.txt" 2>&1
+  loop: "{{ target_nodes | product(debug_commands.system) | list }}"
+  loop_control:
+    label: "{{ item.0 }} → {{ item.1.name }}"
+  when: "'system' in bundle_categories"
+  ignore_errors: true
+
+- name: "Collect diagnostics — Firmware"
+  ansible.builtin.shell: |
+    NODE="{{ item.0 }}"
+    CMD_NAME="{{ item.1.name }}"
+    CMD="{{ item.1.cmd }}"
+    OUTDIR="{{ debug_bundle_dir }}/$NODE/{{ bundle_timestamp }}"
+    {{ cmsh_bin }} -c "device; use $NODE; exec '$CMD'" > "$OUTDIR/${CMD_NAME}.txt" 2>&1
+  loop: "{{ target_nodes | product(debug_commands.firmware) | list }}"
+  loop_control:
+    label: "{{ item.0 }} → {{ item.1.name }}"
+  when: "'firmware' in bundle_categories"
+  ignore_errors: true
+
+- name: "Generate bundle manifest"
+  ansible.builtin.template:
+    src: bundle_manifest.j2
+    dest: "{{ debug_bundle_dir }}/{{ item }}/{{ bundle_timestamp }}/MANIFEST.txt"
+    mode: '0644'
+  loop: "{{ target_nodes }}"
+
+- name: "Create tarball for each node"
+  ansible.builtin.shell: |
+    NODE="{{ item }}"
+    BUNDLE_NAME="nvidia-debug-bundle_${NODE}_{{ bundle_timestamp }}"
+    cd "{{ debug_bundle_dir }}/$NODE"
+    tar czf "{{ debug_bundle_dir }}/${BUNDLE_NAME}.tar.gz" "{{ bundle_timestamp }}/"
+    ls -lh "{{ debug_bundle_dir }}/${BUNDLE_NAME}.tar.gz"
+    echo "BUNDLE_PATH={{ debug_bundle_dir }}/${BUNDLE_NAME}.tar.gz"
+  loop: "{{ target_nodes }}"
+  register: tarball_result
+
+- name: "Upload bundles to S3"
+  ansible.builtin.script:
+    cmd: "upload_to_s3.sh {{ debug_bundle_dir }}/nvidia-debug-bundle_{{ item }}_{{ bundle_timestamp }}.tar.gz {{ s3_bucket }} {{ s3_region }} {{ s3_presign_expiry }}"
+  loop: "{{ target_nodes }}"
+  register: s3_upload_result
+  when: upload_to_s3 | default(true) | bool
+  ignore_errors: true
+
+- name: "Display download URLs"
+  ansible.builtin.debug:
+    msg: |
+      ═══ DEBUG BUNDLE READY ═══
+      Node:     {{ item.item }}
+      Bundle:   nvidia-debug-bundle_{{ item.item }}_{{ bundle_timestamp }}.tar.gz
+      Local:    {{ debug_bundle_dir }}/nvidia-debug-bundle_{{ item.item }}_{{ bundle_timestamp }}.tar.gz
+      S3 URL:   {{ item.stdout_lines | select('match', '^https://') | first | default('S3 upload skipped or failed') }}
+      ══════════════════════════
+  loop: "{{ s3_upload_result.results | default(tarball_result.results) }}"
+  loop_control:
+    label: "{{ item.item }}"

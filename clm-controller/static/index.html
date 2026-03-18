@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>CIC AI Compute Platform</title>
+  <meta name="description" content="CIC AI Compute Platform — GPU Infrastructure Command Center">
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="bg-layer">
+    <div class="bg-gradient-mesh"></div><canvas id="particle-canvas"></canvas>
+  </div>
+  <div id="toast-container"></div>
+
+  <!-- Cmd-K -->
+  <div class="cmdk-overlay" id="cmdk-overlay">
+    <div class="cmdk-box">
+      <div class="cmdk-input-row">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input id="cmdk-input" placeholder="Search nodes, racks, incidents..." autocomplete="off" spellcheck="false">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="cmdk-results" id="cmdk-results"></div>
+      <div class="cmdk-footer">
+        <span><kbd>↑↓</kbd> navigate</span><span><kbd>↵</kbd> select</span><span><kbd>G</kbd>+<kbd>C</kbd>
+          Capacity</span><span><kbd>G</kbd>+<kbd>H</kbd> Health</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Login -->
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-hero" style="background-image:url('hero.png')"></div>
+    <div class="login-box">
+      <img src="logo.svg" alt="CIC" class="login-logo">
+      <h2>CIC AI Compute Platform</h2>
+      <p class="sub">GPU Infrastructure Command Center</p>
+      <form id="login-form" autocomplete="off">
+        <input type="text" id="login-user" name="cic-u" placeholder="Username" autocomplete="off" required>
+        <input type="password" id="login-pass" name="cic-p" placeholder="Password" autocomplete="off" required>
+        <button type="submit" id="login-btn"><span id="login-btn-text">Sign In</span><span id="login-spinner"
+            class="spinner" style="display:none"></span></button>
+      </form>
+      <div class="login-sso">
+        <div class="sso-divider"><span>or</span></div>
+        <button class="sso-btn" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>SSO Sign In (Coming Soon)</button>
+      </div>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app-shell" style="display:none">
+    <nav class="top-nav">
+      <div class="nav-inner">
+        <div class="nav-brand"><img src="logo.svg" alt="CIC" class="nav-logo"><span class="nav-title">CIC AI
+            Compute</span></div>
+        <div class="nav-tabs" id="nav-tabs">
+          <div class="nav-tab active" data-view="global">Global View</div>
+          <div class="nav-tab" data-view="capacity">Capacity</div>
+          <div class="nav-tab" data-view="health">Health</div>
+          <div class="nav-tab" data-view="incidents">Incidents</div>
+          <div class="nav-tab" data-view="help">Help</div>
+        </div>
+        <div class="nav-actions">
+          <button class="nav-search-btn" id="open-cmdk" title="Search (⌘K)"><svg width="15" height="15"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg><span class="search-hint">Search</span><kbd>/</kbd></button>
+          <button class="nav-bell" id="notif-bell" title="Notifications"><svg width="16" height="16" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg><span class="bell-badge" id="bell-badge">0</span></button>
+          <div class="nav-divider"></div>
+          <span class="api-live"></span><span class="api-label" id="nav-count">--</span>
+          <div class="nav-divider"></div>
+          <span class="nav-user" id="nav-user">admin</span>
+          <button class="logout-btn" id="logout-btn" title="Sign Out"><svg width="16" height="16" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg></button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="breadcrumb-bar" id="breadcrumb" style="display:none">
+      <div class="breadcrumb-inner" id="breadcrumb-inner"></div>
+    </div>
+    <div class="notif-drawer" id="notif-drawer">
+      <div class="notif-head"><span>Notifications</span><button class="notif-clear" id="notif-clear">Clear All</button>
+      </div>
+      <div id="notif-list"></div>
+    </div>
+
+    <main class="main-content">
+      <!-- GLOBAL VIEW -->
+      <section id="v-global" class="view active">
+        <div class="hero-banner" id="hero-banner"><img src="hero.png" alt="DC" class="hero-banner-img">
+          <div class="hero-banner-overlay">
+            <h1 class="hero-banner-title">CIC AI Compute Platform</h1>
+            <p class="hero-banner-sub">GPU Infrastructure Command Center</p><button class="hero-collapse"
+              id="hero-collapse">▲</button>
+          </div>
+        </div>
+        <div class="section-header anim-in" style="--d:.05s">
+          <h2>Global Infrastructure</h2>
+          <div class="time-range-bar" id="gl-time-range">
+            <button class="tr-btn active" data-range="7d">7d</button>
+            <button class="tr-btn" data-range="30d">30d</button>
+            <button class="tr-btn" data-range="90d">90d</button>
+            <button class="tr-btn" data-range="6mo">6mo</button>
+            <button class="tr-btn" data-range="1yr">1yr</button>
+          </div>
+        </div>
+        <div class="kpi-grid anim-in" id="gl-kpis" style="--d:.1s"></div>
+        <div class="ring-row anim-in" id="gl-rings" style="--d:.15s"></div>
+        <div id="gl-node-states" class="anim-in" style="--d:.18s"></div>
+        <div class="dual-chart anim-in" style="--d:.2s">
+          <div class="chart-card">
+            <div class="chart-title">Fleet Health</div>
+            <div class="chart-container" id="gl-chart-health"></div>
+            <div class="chart-legend" id="gl-legend-health"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Power Draw</div>
+            <div class="chart-container" id="gl-chart-power"></div>
+            <div class="chart-legend" id="gl-legend-power"></div>
+          </div>
+        </div>
+        <div class="dual-chart anim-in" style="--d:.25s">
+          <div class="chart-card">
+            <div class="chart-title">Month-over-Month Health Trend</div>
+            <div class="chart-container" id="gl-chart-mom"></div>
+            <div class="chart-legend" id="gl-legend-mom"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">GPU Utilization Trend</div>
+            <div class="chart-container" id="gl-chart-util"></div>
+            <div class="chart-legend" id="gl-legend-util"></div>
+          </div>
+        </div>
+        <div class="dual-chart anim-in" style="--d:.3s">
+          <div class="chart-card">
+            <div class="chart-title">SLA & Availability</div>
+            <div class="chart-container" id="gl-chart-sla"></div>
+            <div class="chart-legend" id="gl-legend-sla"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Incidents</div>
+            <div class="chart-container" id="gl-chart-inc"></div>
+            <div class="chart-legend" id="gl-legend-inc"></div>
+          </div>
+        </div>
+
+        <div class="section-header anim-in" style="--d:.35s">
+          <h2>Availability Zones</h2>
+        </div>
+        <div id="gl-regions"></div>
+        <div id="az-drill" style="display:none;margin-top:16px"></div>
+
+        <div class="section-header anim-in" style="--d:.4s;margin-top:20px">
+          <h2>Rack Elevation View</h2>
+          <span class="dim">Click any node for details</span>
+        </div>
+        <div id="gl-rack-elevation"></div>
+
+        <div class="section-header anim-in" style="--d:.45s;margin-top:20px">
+          <h2>Network Topology</h2>
+          <span class="dim">Spine-Leaf InfiniBand Fabric</span>
+        </div>
+        <div id="gl-network-topo"></div>
+      </section>
+
+      <!-- CAPACITY (merged: Capacity + Fleet + BOM) -->
+      <section id="v-capacity" class="view">
+        <div class="section-header">
+          <h2>Capacity</h2>
+        </div>
+        <div class="sub-tabs" id="cap-sub-tabs">
+          <button class="sub-tab active" data-sub="cap-overview">Overview & SLAs</button>
+          <button class="sub-tab" data-sub="cap-fleet">Fleet Explorer</button>
+          <button class="sub-tab" data-sub="cap-bom">Bill of Materials</button>
+        </div>
+
+        <!-- Sub: Overview & SLAs -->
+        <div class="sub-panel active" id="sub-cap-overview">
+          <div class="cap-tabs" id="cap-tabs">
+            <button class="cap-tab active" data-cap="overview">Overview</button>
+            <button class="cap-tab" data-cap="env">By Environment</button>
+            <button class="cap-tab" data-cap="sku">By SKU</button>
+            <button class="cap-tab" data-cap="az">By AZ</button>
+          </div>
+          <div class="fleet-kpis" id="cap-kpis"></div>
+          <div id="cap-body"></div>
+          <div class="section-header" style="margin-top:24px">
+            <h2>Compute SLAs by Environment</h2>
+          </div>
+          <div id="sla-body"></div>
+          <div class="section-header" style="margin-top:24px">
+            <h2>Node State Distribution</h2>
+          </div>
+          <div class="dual-chart" style="margin-top:12px">
+            <div class="chart-card">
+              <div class="chart-title">State Distribution</div>
+              <div id="cap-state-dist"></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">State Definitions</div>
+              <div id="cap-state-defs"></div>
+            </div>
+          </div>
+          <div class="dual-chart" style="margin-top:20px">
+            <div class="chart-card">
+              <div class="chart-title">GPU Utilization Trend</div>
+              <div class="chart-container" id="cap-chart-util"></div>
+              <div class="chart-legend" id="cap-legend-util"></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Power Consumption</div>
+              <div class="chart-container" id="cap-chart-power"></div>
+              <div class="chart-legend" id="cap-legend-power"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub: Fleet Explorer -->
+        <div class="sub-panel" id="sub-cap-fleet">
+          <div class="section-header">
+            <h2>Node Explorer</h2><span id="fleet-count" class="badge-count"></span>
+            <div class="section-actions"><button class="action-btn" id="fleet-export"><svg width="15" height="15"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>Export CSV</button></div>
+          </div>
+          <div id="fleet-filters" class="filter-row"></div>
+          <div id="fleet-filters2" class="filter-row" style="margin-top:6px"></div>
+          <div class="fleet-kpis" id="fleet-kpis"></div>
+          <div class="table-wrap">
+            <table class="dt" id="fleet-table">
+              <thead>
+                <tr>
+                  <th data-sort="id">Node ID</th>
+                  <th data-sort="state">State</th>
+                  <th data-sort="environment">Environment</th>
+                  <th data-sort="sku">SKU</th>
+                  <th data-sort="health_score">Health</th>
+                  <th>Trend</th>
+                  <th data-sort="power_draw_kw">Power</th>
+                  <th>Cordon</th>
+                </tr>
+              </thead>
+              <tbody id="fleet-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Sub: BOM -->
+        <div class="sub-panel" id="sub-cap-bom">
+          <div class="section-header">
+            <h2>Node Bill of Materials</h2><span id="bom-count" class="badge-count"></span>
+            <div class="section-actions"><button class="action-btn" id="bom-export"><svg width="15" height="15"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>Export CSV</button></div>
+          </div>
+          <div id="bom-filters" class="filter-row"></div>
+          <div id="bom-kpis" class="fleet-kpis"></div>
+          <div id="bom-body"></div>
+        </div>
+      </section>
+
+      <!-- HEALTH (merged: Health + Firmware + Incidents + Dashboards) -->
+      <section id="v-health" class="view">
+        <div class="section-header">
+          <h2>Health & Operations</h2>
+        </div>
+        <div class="sub-tabs" id="health-sub-tabs">
+          <button class="sub-tab active" data-sub="health-fleet">Fleet Health</button>
+          <button class="sub-tab" data-sub="health-clusters">Logical Clusters</button>
+          <button class="sub-tab" data-sub="health-firmware">Firmware</button>
+          <button class="sub-tab" data-sub="health-dashboards">Dashboards</button>
+        </div>
+
+        <!-- Sub: Fleet Health -->
+        <div class="sub-panel active" id="sub-health-fleet">
+          <div class="section-header">
+            <h2>Auto-Cordoned Nodes</h2>
+          </div>
+          <div id="hc-cordon"></div>
+          <div class="section-header" style="margin-top:20px">
+            <h2>Degraded Health</h2><span class="dim" style="margin-left:8px">Click any node for component
+              diagram</span>
+          </div>
+          <div id="hc-degraded"></div>
+          <div class="section-header" style="margin-top:20px">
+            <h2>Available for Assignment</h2>
+          </div>
+          <div id="hc-available"></div>
+        </div>
+
+        <!-- Sub: Firmware -->
+        <div class="sub-panel" id="sub-health-firmware">
+          <div class="section-header">
+            <h2>Firmware Compliance</h2><span class="fw-legend"><span class="fw-dot fw-match"></span>At Baseline<span
+                class="fw-dot fw-drift"></span>Drift</span>
+            <div class="section-actions"><button class="action-btn" id="fw-export"><svg width="15" height="15"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>Export CSV</button></div>
+          </div>
+          <div id="fw-filters" class="filter-row"></div>
+          <div id="fw-kpis" class="fleet-kpis"></div>
+          <div id="fw-body"></div>
+        </div>
+
+        <!-- Sub: Dashboards -->
+        <div class="sub-panel" id="sub-health-dashboards">
+          <div class="section-header">
+            <h2>Operational Dashboards</h2>
+          </div>
+          <div class="dash-tabs">
+            <button class="dash-tab active" data-dash="fleet-health">Fleet Health</button>
+            <button class="dash-tab" data-dash="gpu-util">GPU Utilization</button>
+            <button class="dash-tab" data-dash="power">Power & Thermal</button>
+            <button class="dash-tab" data-dash="incidents-dash">Incident Analytics</button>
+            <button class="dash-tab" data-dash="ext-grafana">External Grafana</button>
+          </div>
+          <div id="dash-body"></div>
+        </div>
+
+        <!-- Sub: Logical Clusters -->
+        <div class="sub-panel" id="sub-health-clusters">
+          <div class="section-header">
+            <h2>Physical Cluster Health</h2>
+            <span class="dim">SLA, incidents, and node states per logical cluster</span>
+          </div>
+          <div id="clusters-body"></div>
+        </div>
+      </section>
+
+      <!-- INCIDENTS (top-level) -->
+      <section id="v-incidents" class="view">
+        <div class="section-header">
+          <h2>Incident Command Center</h2><span class="powered-by">powered by Rootly</span>
+        </div>
+        <div class="sub-tabs" id="inc-sub-tabs">
+          <button class="sub-tab active" data-sub="inc-overview">Overview & MTTR</button>
+          <button class="sub-tab" data-sub="inc-patterns">Pattern Analysis</button>
+          <button class="sub-tab" data-sub="inc-components">Component Health</button>
+        </div>
+        <div class="sub-panel active" id="sub-inc-overview">
+          <div id="inc-filters" class="filter-row"></div>
+          <div class="inc-stats" id="inc-stats"></div>
+          <div class="dual-chart" style="margin-top:16px">
+            <div class="chart-card">
+              <div class="chart-title">Incident Volume</div>
+              <div class="chart-container" id="inc-chart-vol"></div>
+              <div class="chart-legend" id="inc-legend-vol"></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">MTTR Trend</div>
+              <div class="chart-container" id="inc-chart-mttr"></div>
+              <div class="chart-legend" id="inc-legend-mttr"></div>
+            </div>
+          </div>
+          <div id="inc-body"></div>
+          <div class="section-header" style="margin-top:24px">
+            <h2>Launch Reviews & Changes</h2>
+          </div>
+          <div id="inc-changes"></div>
+          <div class="section-header" style="margin-top:24px">
+            <h2>Access & Audit Log</h2>
+          </div>
+          <div id="inc-audit"></div>
+        </div>
+        <div class="sub-panel" id="sub-inc-patterns">
+          <div id="inc-patterns"></div>
+        </div>
+        <div class="sub-panel" id="sub-inc-components">
+          <div id="inc-components"></div>
+        </div>
+      </section>
+
+      <!-- HELP -->
+      <section id="v-help" class="view">
+        <div class="section-header">
+          <h2>Platform Guide</h2>
+        </div>
+        <div id="help-body"></div>
+      </section>
+    </main>
+    <footer class="site-footer"><span>CIC AI Compute Platform v7.0</span><span><a href="/docs">API Docs</a> · <a
+          href="/metrics">Prometheus</a></span></footer>
+  </div>
+
+  <!-- Node Diagram Modal -->
+  <div class="node-diagram-overlay" id="node-diagram-overlay">
+    <div class="node-diagram-modal">
+      <button class="nd-close" id="nd-close">✕</button>
+      <div class="nd-header" id="nd-header"></div>
+      <div class="nd-body" id="nd-body"></div>
+    </div>
+  </div>
+
+  <!-- Detail Panel -->
+  <div class="detail-panel" id="detail-panel">
+    <button class="dp-close" id="dp-close-btn">✕</button>
+    <div class="dp-head">
+      <h2 id="dp-title"></h2>
+      <div class="dp-sub" id="dp-sub"></div>
+    </div>
+    <div class="dp-tabs">
+      <div class="dp-tab active" data-tab="overview">Overview</div>
+      <div class="dp-tab" data-tab="bom">BOM</div>
+      <div class="dp-tab" data-tab="firmware">Firmware</div>
+    </div>
+    <div id="dp-body"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

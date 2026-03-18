@@ -1,0 +1,7 @@
+operation: day2_cordon
+targets:
+- gpu-bm-005
+parameters: {}
+requested_by: nlm-controller@nlm.cic.io
+approved_by: ''
+reason: Needs customer approval

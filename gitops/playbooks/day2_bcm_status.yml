@@ -1,0 +1,36 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — BCM Status Toggle (UP / CLOSED)
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — BCM Status Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    bcm_status: "{{ parameters.bcm_status | default('UP') }}"
+
+  tasks:
+    - name: "Validate BCM status value"
+      ansible.builtin.assert:
+        that: bcm_status | upper in ['UP', 'CLOSED', 'DOWN', 'INSTALL']
+        fail_msg: "Invalid bcm_status '{{ bcm_status }}'"
+
+    - name: "Set BCM status on target nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; set status {{ bcm_status | upper }}; commit"
+      loop: "{{ target_nodes }}"
+
+    - name: "Verify BCM status"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get status" | tail -1
+      loop: "{{ target_nodes }}"
+      register: status_verify
+      changed_when: false
+
+    - name: "Report"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | trim }}"
+      loop: "{{ status_verify.results }}"
+      loop_control:
+        label: "{{ item.item }}"

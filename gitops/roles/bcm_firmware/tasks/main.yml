@@ -1,0 +1,47 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Firmware — Check & Update Role
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Collect firmware versions from target nodes"
+  ansible.builtin.shell: |
+    NODE="{{ item }}"
+    echo "═══ FIRMWARE REPORT: $NODE ═══"
+    echo "── GPU Firmware ──"
+    {{ cmsh_bin }} -c "device; use $NODE; exec 'nvfwupd show_version 2>/dev/null || echo nvfwupd-not-found'"
+    echo ""
+    echo "── NIC Firmware (mlxfwmanager) ──"
+    {{ cmsh_bin }} -c "device; use $NODE; exec 'mlxfwmanager --query 2>/dev/null || echo mlxfwmanager-not-found'"
+    echo ""
+    echo "── BMC Firmware ──"
+    {{ cmsh_bin }} -c "device; use $NODE; exec 'ipmitool mc info 2>/dev/null | grep -E \"Firmware|Manufacturer|Product\"'"
+    echo ""
+    echo "── BIOS Version ──"
+    {{ cmsh_bin }} -c "device; use $NODE; exec 'dmidecode -t bios 2>/dev/null | grep -E \"Version|Vendor|Release\"'"
+  loop: "{{ target_nodes }}"
+  register: fw_report
+  changed_when: false
+
+- name: "Display firmware report"
+  ansible.builtin.debug:
+    msg: "{{ item.stdout }}"
+  loop: "{{ fw_report.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "Run firmware update (when update_firmware=true)"
+  ansible.builtin.shell: |
+    NODE="{{ item }}"
+    echo "Updating firmware on $NODE..."
+    {{ cmsh_bin }} -c "device; use $NODE; exec 'nvfwupd update --yes 2>&1'"
+  loop: "{{ target_nodes }}"
+  register: fw_update
+  when: update_firmware | default(false) | bool
+
+- name: "Firmware update results"
+  ansible.builtin.debug:
+    msg: "{{ item.stdout }}"
+  loop: "{{ fw_update.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: update_firmware | default(false) | bool

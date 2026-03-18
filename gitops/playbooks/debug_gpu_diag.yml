@@ -1,0 +1,11 @@
+---
+# Debug — GPU Diagnostics Only
+- name: "Debug — GPU Diagnostics"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    categories: ['gpu']
+    upload_to_s3: "{{ parameters.upload_to_s3 | default(true) }}"
+  roles:
+    - bcm_debug_bundle

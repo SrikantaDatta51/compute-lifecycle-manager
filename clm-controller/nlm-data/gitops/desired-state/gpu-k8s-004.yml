@@ -1,0 +1,10 @@
+apiVersion: nlm.cic.io/v1
+kind: NodeState
+metadata:
+  name: gpu-k8s-004
+  labels: {}
+  updated_at: '2026-03-14T09:11:57.080653+00:00'
+  updated_by: nlm-testing
+spec:
+  desired_state: certified_ready
+  tenant: ''

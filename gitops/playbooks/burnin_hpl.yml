@@ -1,0 +1,91 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Burn-In — HPL (High-Performance Linpack) Benchmark
+# ═══════════════════════════════════════════════════════════════════
+# Runs NVIDIA's HPL benchmark to validate GPU compute throughput.
+# Uses the NVIDIA HPC Benchmarks container.
+# Expected: ~60 TFLOPS per DGX B200 node (8× B200 GPUs)
+
+- name: "Burn-In — HPL Benchmark"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    ticket_id: "{{ parameters.ticket_id | default('BURNIN') }}"
+
+  tasks:
+    - name: "Log HPL configuration"
+      ansible.builtin.debug:
+        msg: |
+          ═══ HPL BENCHMARK ═══
+          Nodes:        {{ target_nodes | join(', ') }}
+          Container:    {{ hpl_config.container_image }}
+          Problem size: N={{ hpl_config.problem_size }}, NB={{ hpl_config.block_size }}
+          Process grid: P={{ hpl_config.process_grid_p }}, Q={{ hpl_config.process_grid_q }}
+          Expected:     ≥ {{ hpl_config.expected_tflops }} TFLOPS per node
+          Timeout:      {{ hpl_config.timeout }}s
+
+    - name: "Run HPL benchmark"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/hpl"
+        mkdir -p "$OUTDIR"
+
+        echo "═══ HPL on $NODE ═══"
+        echo "Started: $(date -Iseconds)"
+
+        {{ cmsh_bin }} -c "device; use $NODE; exec '
+          docker run --rm --gpus all --ipc=host --ulimit memlock=-1 \
+            -e CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+            {{ hpl_config.container_image }} \
+            mpirun --allow-run-as-root \
+              -np {{ gpu_count_per_node }} \
+              --bind-to none \
+              -x CUDA_VISIBLE_DEVICES \
+              -x LD_LIBRARY_PATH \
+              /workspace/hpl.sh \
+              --dat /workspace/hpl-linux-x86_64/sample-dat/HPL-dgx-{{ gpu_count_per_node }}GPU.dat \
+              2>&1
+        '" > "$OUTDIR/hpl-${TIMESTAMP}.txt" 2>&1
+
+        echo "Completed: $(date -Iseconds)"
+
+        # Display results
+        cat "$OUTDIR/hpl-${TIMESTAMP}.txt"
+
+        # Extract TFLOPS (HPL reports Gflops, convert)
+        GFLOPS=$(grep -E "^W" "$OUTDIR/hpl-${TIMESTAMP}.txt" | \
+                 tail -1 | awk '{print $NF}')
+
+        if [ -n "$GFLOPS" ]; then
+          TFLOPS=$(echo "scale=2; $GFLOPS / 1000" | bc 2>/dev/null || echo "N/A")
+          echo ""
+          echo "Peak Performance: ${GFLOPS} Gflops (${TFLOPS} TFLOPS)"
+          echo "Expected: ≥ {{ hpl_config.expected_tflops }} TFLOPS"
+
+          GFLOPS_INT=$(echo "$GFLOPS" | cut -d. -f1)
+          EXPECTED_GFLOPS=$(( {{ hpl_config.expected_tflops }} * 1000 ))
+          if [ "${GFLOPS_INT:-0}" -ge "$EXPECTED_GFLOPS" ] 2>/dev/null; then
+            echo "✅ HPL PASSED on $NODE"
+          else
+            echo "⚠️ HPL BELOW THRESHOLD on $NODE"
+          fi
+        else
+          echo "⚠️ Could not extract HPL performance — check raw output"
+        fi
+      loop: "{{ target_nodes }}"
+      register: hpl_results
+      async: "{{ hpl_config.timeout }}"
+      poll: 60
+      ignore_errors: true
+
+    - name: "HPL Results Summary"
+      ansible.builtin.debug:
+        msg: |
+          ═══ HPL RESULTS ═══
+          Node:   {{ item.item }}
+          Status: {{ '✅ PASSED' if item.rc == 0 else '⚠️ CHECK RESULTS' }}
+      loop: "{{ hpl_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"

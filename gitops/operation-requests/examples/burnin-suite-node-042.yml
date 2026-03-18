@@ -1,0 +1,19 @@
+---
+operation: burnin_suite
+targets:
+  - dgx-b200-042
+parameters:
+  ticket_id: POST-RMA-42
+  skip_on_failure: false
+  tests:
+    - dcgmi_r3
+    - dcgmi_r4
+    - nvbandwidth
+    - nccl_all_reduce
+    - nccl_all_gather
+    - nccl_reduce_scatter
+    - hpl
+    - nemo_inference
+requested_by: oncall-l1@company.com
+approved_by: ""
+reason: "Post-RMA GPU replacement validation — running full burn-in certification suite"

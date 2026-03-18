@@ -1,0 +1,35 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Day 2 — Common Operations Role
+# ═══════════════════════════════════════════════════════════════════
+# Shared tasks used by Day 2 playbooks. Runs on BCM head node.
+
+- name: "Verify target nodes are reachable via BCM"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; get status" 2>&1 | tail -1
+  loop: "{{ target_nodes }}"
+  register: node_status_check
+  changed_when: false
+  failed_when: "'Error' in node_status_check.stdout or node_status_check.rc != 0"
+
+- name: "Display current node status"
+  ansible.builtin.debug:
+    msg: "Node {{ item.item }}: {{ item.stdout | trim }}"
+  loop: "{{ node_status_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "Execute operation command on target nodes"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; {{ operation_command }}"
+  loop: "{{ target_nodes }}"
+  register: operation_result
+  when: operation_command is defined
+
+- name: "Execute remote command via cmsh exec"
+  ansible.builtin.shell: |
+    {{ cmsh_bin }} -c "device; use {{ item }}; exec '{{ remote_command }}'"
+  loop: "{{ target_nodes }}"
+  register: remote_result
+  when: remote_command is defined
+  changed_when: false

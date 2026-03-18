@@ -1,0 +1,22 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 0 — Full Node Provisioning
+# ═══════════════════════════════════════════════════════════════════
+# Provisions or re-images nodes via BCM.
+#
+# Triggered by operation request:
+#   operation: day0_provision
+#   targets: [dgx-b200-065]
+#   parameters:
+#     image_profile: dgx-b200-ubuntu2204
+#     category: dgx-gpu-nodes
+
+- name: "Day 0 — Provision Nodes via BCM"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    image_profile: "{{ parameters.image_profile | default('default') }}"
+    category: "{{ parameters.category | default('dgx-gpu-nodes') }}"
+  roles:
+    - bcm_day0

@@ -1,0 +1,53 @@
+═══════════════════════════════════════════════════════════════════
+NVIDIA Debug Bundle Manifest
+═══════════════════════════════════════════════════════════════════
+
+Node:        {{ item }}
+Timestamp:   {{ bundle_timestamp }}
+Fleet:       {{ fleet_name }}
+GPU Model:   {{ gpu_model }} × {{ gpu_count_per_node }}
+Categories:  {{ bundle_categories | join(', ') }}
+Collected By: BCM Ansible GitOps Pipeline
+
+───────────────────────────────────────────────────────────────────
+Contents
+───────────────────────────────────────────────────────────────────
+{% if 'gpu' in bundle_categories %}
+GPU Diagnostics:
+{% for cmd in debug_commands.gpu %}
+  - {{ cmd.name }}.txt    ({{ cmd.cmd }})
+{% endfor %}
+
+{% endif %}
+{% if 'ib' in bundle_categories %}
+InfiniBand Diagnostics:
+{% for cmd in debug_commands.ib %}
+  - {{ cmd.name }}.txt    ({{ cmd.cmd }})
+{% endfor %}
+
+{% endif %}
+{% if 'nvsm' in bundle_categories %}
+NVSM Diagnostics:
+{% for cmd in debug_commands.nvsm %}
+  - {{ cmd.name }}.txt    ({{ cmd.cmd }})
+{% endfor %}
+
+{% endif %}
+{% if 'system' in bundle_categories %}
+System & Kernel Logs:
+{% for cmd in debug_commands.system %}
+  - {{ cmd.name }}.txt    ({{ cmd.cmd }})
+{% endfor %}
+
+{% endif %}
+{% if 'firmware' in bundle_categories %}
+Firmware Versions:
+{% for cmd in debug_commands.firmware %}
+  - {{ cmd.name }}.txt    ({{ cmd.cmd }})
+{% endfor %}
+
+{% endif %}
+───────────────────────────────────────────────────────────────────
+Usage: Attach this entire .tar.gz to NVIDIA Support Case
+Portal:  https://enterprise-support.nvidia.com/
+───────────────────────────────────────────────────────────────────

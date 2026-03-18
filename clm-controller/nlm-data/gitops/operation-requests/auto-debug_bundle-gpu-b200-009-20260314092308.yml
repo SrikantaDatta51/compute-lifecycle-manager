@@ -1,0 +1,8 @@
+operation: debug_bundle
+targets:
+- gpu-b200-009
+parameters:
+  upload_to_s3: true
+requested_by: nlm-reconciler@nlm.cic.io
+approved_by: nlm-reconciler@nlm.cic.io
+reason: 'Auto log collection: hw_gpu_contained'

@@ -1,0 +1,72 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — GPU Reset & Cleanup
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — GPU Reset & Cleanup"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    ticket_id: "{{ parameters.ticket_id | default('NO-TICKET') }}"
+
+  tasks:
+    - name: "Reset GPU application clocks to default"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'nvidia-smi -rac'"
+      loop: "{{ target_nodes }}"
+
+    - name: "Clear volatile ECC error counters"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'nvidia-smi --reset-ecc-errors=volatile'"
+      loop: "{{ target_nodes }}"
+
+    - name: "Enable persistent mode"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'nvidia-smi -pm 1'"
+      loop: "{{ target_nodes }}"
+
+    - name: "Reset compute mode to DEFAULT"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'nvidia-smi -c DEFAULT'"
+      loop: "{{ target_nodes }}"
+
+    - name: "Restart GPU services"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'systemctl restart {{ svc }}'"
+      loop: "{{ target_nodes | product(gpu_services) | list }}"
+      vars:
+        svc: "{{ item[1] }}"
+      loop_control:
+        label: "{{ item[0] }} → {{ item[1] }}"
+
+    - name: "Clean GPU temp files"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'rm -rf /tmp/nccl_* /tmp/torch_* /tmp/nvidia-* /tmp/cuda-* /dev/shm/nccl-* /dev/shm/cuda-*'"
+      loop: "{{ target_nodes }}"
+
+    - name: "Verify GPU state post-reset"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        echo "── GPU Status: $NODE ──"
+        echo "GPU Count:"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'nvidia-smi -L'"
+        echo ""
+        echo "ECC Status:"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'nvidia-smi -q -d ECC 2>/dev/null | grep -A2 Volatile'"
+        echo ""
+        echo "Services:"
+        for svc in {{ gpu_services | join(' ') }}; do
+          STATUS=$({{ cmsh_bin }} -c "device; use $NODE; exec 'systemctl is-active $svc'" | tail -1)
+          echo "  $svc: $STATUS"
+        done
+      loop: "{{ target_nodes }}"
+      register: gpu_verify
+      changed_when: false
+
+    - name: "Report GPU reset results"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ gpu_verify.results }}"
+      loop_control:
+        label: "{{ item.item }}"

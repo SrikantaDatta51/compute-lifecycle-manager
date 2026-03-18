@@ -1,0 +1,60 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Day 2 — Cordon Node (Slurm Drain + BCM CLOSED)
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Day 2 — Cordon Node"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    ticket_id: "{{ parameters.ticket_id | default('NO-TICKET') }}"
+    reason_type: "{{ parameters.reason_type | default('fault') }}"
+
+  tasks:
+    - name: "Set drain reason based on type"
+      ansible.builtin.set_fact:
+        drain_reason: "{{ drain_reasons[reason_type] | default('fault-detected') }}-{{ ticket_id }}"
+
+    - name: "Check current node state in Slurm"
+      ansible.builtin.shell: |
+        sinfo -N -n {{ item }} -l 2>/dev/null | tail -1
+      loop: "{{ target_nodes }}"
+      register: slurm_state
+      changed_when: false
+      ignore_errors: true
+
+    - name: "Drain node in Slurm"
+      ansible.builtin.shell: |
+        scontrol update NodeName={{ item }} State=DRAIN Reason="{{ drain_reason }}"
+      loop: "{{ target_nodes }}"
+      register: drain_result
+      failed_when: false
+
+    - name: "Close node in BCM"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; set status CLOSED; commit"
+      loop: "{{ target_nodes }}"
+
+    - name: "Verify cordon state"
+      ansible.builtin.shell: |
+        echo "── {{ item }} ──"
+        echo "Slurm: $(sinfo -N -n {{ item }} -l 2>/dev/null | tail -1)"
+        echo "BCM:   $({{ cmsh_bin }} -c 'device; use {{ item }}; get status' 2>/dev/null | tail -1)"
+      loop: "{{ target_nodes }}"
+      register: verify_cordon
+      changed_when: false
+
+    - name: "Report cordon results"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ verify_cordon.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "Fleet drain count check"
+      ansible.builtin.shell: |
+        DRAIN_COUNT=$(sinfo -N -l 2>/dev/null | grep -c drain)
+        echo "Current drain count: $DRAIN_COUNT (buffer target: {{ buffer_nodes }})"
+        [ "$DRAIN_COUNT" -le "{{ buffer_nodes + (target_nodes | length) }}" ] && echo "✅ Within expected range" || echo "⚠️ More nodes drained than expected"
+      changed_when: false

@@ -1,0 +1,10 @@
+apiVersion: nlm.cic.io/v1
+kind: NodeState
+metadata:
+  name: cpu-kr1a-005
+  labels: {}
+  updated_at: '2026-03-14T08:40:32.254798+00:00'
+  updated_by: nlm-maintenance
+spec:
+  desired_state: scheduled_maintenance
+  tenant: ''

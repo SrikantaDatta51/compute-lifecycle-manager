@@ -1,0 +1,50 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Burn-In — nvbandwidth (GPU Memory Bandwidth Test)
+# ═══════════════════════════════════════════════════════════════════
+# Tests host-to-device, device-to-host, device-to-device, and
+# all-to-all memory bandwidth using nvbandwidth tool.
+
+- name: "Burn-In — nvbandwidth"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    ticket_id: "{{ parameters.ticket_id | default('BURNIN') }}"
+
+  tasks:
+    - name: "Run nvbandwidth tests"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/nvbandwidth"
+        mkdir -p "$OUTDIR"
+
+        echo "═══ nvbandwidth on $NODE ═══"
+        echo "Started: $(date -Iseconds)"
+
+        {% for test in nvbandwidth_config.tests %}
+        echo ""
+        echo "── Test: {{ test }} ──"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'nvbandwidth -t {{ test }} 2>/dev/null || echo nvbandwidth-not-found'" \
+          | tee -a "$OUTDIR/nvbandwidth-${TIMESTAMP}.txt"
+        {% endfor %}
+
+        echo ""
+        echo "Completed: $(date -Iseconds)"
+        echo "Results saved: $OUTDIR/nvbandwidth-${TIMESTAMP}.txt"
+        echo "✅ nvbandwidth completed on $NODE"
+      loop: "{{ target_nodes }}"
+      register: nvbw_results
+      async: 1800
+      poll: 30
+      ignore_errors: true
+
+    - name: "nvbandwidth Results Summary"
+      ansible.builtin.debug:
+        msg: |
+          Node:   {{ item.item }}
+          Status: {{ '✅ COMPLETED' if item.rc == 0 else '⚠️ CHECK RESULTS' }}
+      loop: "{{ nvbw_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"

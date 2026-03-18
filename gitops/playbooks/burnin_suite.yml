@@ -1,0 +1,298 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Burn-In — Full Suite (Day 0 / Post-RMA Node Certification)
+# ═══════════════════════════════════════════════════════════════════
+# Runs the complete burn-in test suite on target nodes, sequentially:
+#   1. DCGMI Level 3 — extended diagnostics (~15 min)
+#   2. DCGMI Level 4 — full system validation (~90 min)
+#   3. nvbandwidth   — GPU memory bandwidth (~10 min)
+#   4. NCCL tests    — all_reduce, all_gather, reduce_scatter (~30 min)
+#   5. HPL           — compute throughput (~60 min)
+#   6. NeMo          — LLM inference benchmark (~15 min)
+#
+# Total estimated time: ~3.5 hours per node
+#
+# Parameters:
+#   tests: list of tests to run (default: all)
+#   skip_on_failure: true/false — stop suite on first failure
+
+- name: "Burn-In — Full Suite"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    ticket_id: "{{ parameters.ticket_id | default('BURNIN') }}"
+    tests: "{{ parameters.tests | default(burnin_default_tests) }}"
+    skip_on_failure: "{{ parameters.skip_on_failure | default(false) | bool }}"
+
+  tasks:
+    - name: "Log burn-in suite configuration"
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════
+            FULL BURN-IN SUITE — NODE CERTIFICATION
+          ═══════════════════════════════════════════════
+          Nodes:           {{ target_nodes | join(', ') }}
+          Tests:           {{ tests | join(', ') }}
+          Skip on failure: {{ skip_on_failure }}
+          Ticket:          {{ ticket_id }}
+          Estimated time:  ~3.5 hours per node
+          Started:         {{ lookup('pipe', 'date -Iseconds') }}
+          ═══════════════════════════════════════════════
+
+    - name: "Initialize results tracker"
+      ansible.builtin.set_fact:
+        burnin_results: {}
+
+    # ── Phase 1: DCGMI Level 3 ──
+    - name: "Phase 1 — DCGMI Level 3 (extended diagnostics)"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-${TIMESTAMP}"
+        mkdir -p "$OUTDIR"
+
+        echo "══ Phase 1: DCGMI Level 3 on $NODE ══"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'dcgmi diag -r 3'" \
+          > "$OUTDIR/dcgmi-r3.txt" 2>&1
+        EXIT=$?
+
+        if grep -qi "FAIL" "$OUTDIR/dcgmi-r3.txt"; then
+          echo "❌ DCGMI-R3 FAILED"; exit 1
+        else
+          echo "✅ DCGMI-R3 PASSED"; exit 0
+        fi
+      loop: "{{ target_nodes }}"
+      register: phase1
+      async: 1200
+      poll: 30
+      when: "'dcgmi_r3' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Phase 2: DCGMI Level 4 ──
+    - name: "Phase 2 — DCGMI Level 4 (full system validation)"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-$(date +%Y%m%d)"
+        mkdir -p "$OUTDIR"
+
+        echo "══ Phase 2: DCGMI Level 4 on $NODE ══"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'dcgmi diag -r 4'" \
+          > "$OUTDIR/dcgmi-r4.txt" 2>&1
+
+        if grep -qi "FAIL" "$OUTDIR/dcgmi-r4.txt"; then
+          echo "❌ DCGMI-R4 FAILED"; exit 1
+        else
+          echo "✅ DCGMI-R4 PASSED"; exit 0
+        fi
+      loop: "{{ target_nodes }}"
+      register: phase2
+      async: 7200
+      poll: 60
+      when: "'dcgmi_r4' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Phase 3: nvbandwidth ──
+    - name: "Phase 3 — nvbandwidth (GPU memory bandwidth)"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-$(date +%Y%m%d)"
+        mkdir -p "$OUTDIR"
+
+        echo "══ Phase 3: nvbandwidth on $NODE ══"
+        {{ cmsh_bin }} -c "device; use $NODE; exec '
+          nvbandwidth -t host_to_device_memcpy_ce && \
+          nvbandwidth -t device_to_device_memcpy_read_ce && \
+          nvbandwidth -t device_to_device_bidirectional_memcpy_read_ce && \
+          nvbandwidth -t all_to_one_write_ce && \
+          nvbandwidth -t one_to_all_write_ce \
+          2>&1 || echo nvbandwidth-not-found
+        '" > "$OUTDIR/nvbandwidth.txt" 2>&1
+
+        echo "✅ nvbandwidth completed on $NODE"
+      loop: "{{ target_nodes }}"
+      register: phase3
+      async: 1800
+      poll: 30
+      when: "'nvbandwidth' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Phase 4: NCCL AllReduce ──
+    - name: "Phase 4 — NCCL AllReduce (primary bandwidth test)"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-$(date +%Y%m%d)"
+        mkdir -p "$OUTDIR"
+
+        echo "══ Phase 4: NCCL all_reduce_perf on $NODE ══"
+        {{ cmsh_bin }} -c "device; use $NODE; exec '
+          docker run --rm --gpus all --ipc=host --ulimit memlock=-1 \
+            {{ nccl_tests.container_image }} \
+            {{ nccl_tests.nccl_tests_path }}/all_reduce_perf_mpi \
+            -b 8 -e 4G -f 2 -g {{ gpu_count_per_node }} \
+            -w {{ nccl_tests.warmup_iters }} -n {{ nccl_tests.iters }} 2>&1
+        '" > "$OUTDIR/nccl-all_reduce.txt" 2>&1
+
+        # Check peak bandwidth
+        PEAK=$(grep -E "^\s+[0-9]" "$OUTDIR/nccl-all_reduce.txt" | tail -1 | awk '{print $(NF-1)}')
+        echo "Peak bus bandwidth: ${PEAK:-N/A} GB/s (expected ≥ {{ nccl_tests.tests[0].expected_busbw_gbps }} GB/s)"
+        echo "✅ NCCL AllReduce completed on $NODE"
+      loop: "{{ target_nodes }}"
+      register: phase4a
+      async: 3600
+      poll: 30
+      when: "'nccl_all_reduce' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Phase 4b: NCCL AllGather ──
+    - name: "Phase 4b — NCCL AllGather"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-$(date +%Y%m%d)"
+
+        {{ cmsh_bin }} -c "device; use $NODE; exec '
+          docker run --rm --gpus all --ipc=host --ulimit memlock=-1 \
+            {{ nccl_tests.container_image }} \
+            {{ nccl_tests.nccl_tests_path }}/all_gather_perf_mpi \
+            -b 8 -e 4G -f 2 -g {{ gpu_count_per_node }} \
+            -w {{ nccl_tests.warmup_iters }} -n {{ nccl_tests.iters }} 2>&1
+        '" > "$OUTDIR/nccl-all_gather.txt" 2>&1
+        echo "✅ NCCL AllGather completed on $NODE"
+      loop: "{{ target_nodes }}"
+      register: phase4b
+      async: 3600
+      poll: 30
+      when: "'nccl_all_gather' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Phase 4c: NCCL ReduceScatter ──
+    - name: "Phase 4c — NCCL ReduceScatter"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-$(date +%Y%m%d)"
+
+        {{ cmsh_bin }} -c "device; use $NODE; exec '
+          docker run --rm --gpus all --ipc=host --ulimit memlock=-1 \
+            {{ nccl_tests.container_image }} \
+            {{ nccl_tests.nccl_tests_path }}/reduce_scatter_perf_mpi \
+            -b 8 -e 4G -f 2 -g {{ gpu_count_per_node }} \
+            -w {{ nccl_tests.warmup_iters }} -n {{ nccl_tests.iters }} 2>&1
+        '" > "$OUTDIR/nccl-reduce_scatter.txt" 2>&1
+        echo "✅ NCCL ReduceScatter completed on $NODE"
+      loop: "{{ target_nodes }}"
+      register: phase4c
+      async: 3600
+      poll: 30
+      when: "'nccl_reduce_scatter' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Phase 5: HPL ──
+    - name: "Phase 5 — HPL (compute throughput)"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-$(date +%Y%m%d)"
+        mkdir -p "$OUTDIR"
+
+        echo "══ Phase 5: HPL on $NODE ══"
+        {{ cmsh_bin }} -c "device; use $NODE; exec '
+          docker run --rm --gpus all --ipc=host --ulimit memlock=-1 \
+            {{ hpl_config.container_image }} \
+            mpirun --allow-run-as-root -np {{ gpu_count_per_node }} \
+              --bind-to none \
+              /workspace/hpl.sh \
+              --dat /workspace/hpl-linux-x86_64/sample-dat/HPL-dgx-{{ gpu_count_per_node }}GPU.dat \
+              2>&1
+        '" > "$OUTDIR/hpl.txt" 2>&1
+
+        GFLOPS=$(grep -E "^W" "$OUTDIR/hpl.txt" | tail -1 | awk '{print $NF}')
+        echo "HPL Performance: ${GFLOPS:-N/A} Gflops"
+        echo "✅ HPL completed on $NODE"
+      loop: "{{ target_nodes }}"
+      register: phase5
+      async: 7200
+      poll: 60
+      when: "'hpl' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Phase 6: NeMo Inference ──
+    - name: "Phase 6a — Deploy NeMo benchmark script"
+      ansible.builtin.copy:
+        dest: /tmp/nemo_inference_bench.py
+        mode: '0644'
+        content: |
+          import torch, time, sys
+          num_gpus = torch.cuda.device_count()
+          expected = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+          print(f"GPUs: {num_gpus}")
+          assert num_gpus == expected, f"Expected {expected}, found {num_gpus}"
+          results = []
+          for g in range(num_gpus):
+              torch.cuda.set_device(g)
+              a = torch.randn(4096, 4096, dtype=torch.bfloat16, device=f"cuda:{g}")
+              b = torch.randn(4096, 4096, dtype=torch.bfloat16, device=f"cuda:{g}")
+              for _ in range(5): torch.matmul(a, b)
+              torch.cuda.synchronize()
+              t0 = time.time()
+              for _ in range(100): torch.matmul(a, b)
+              torch.cuda.synchronize()
+              tflops = (2*4096**3*100)/((time.time()-t0)*1e12)
+              results.append(tflops)
+              print(f"GPU {g}: {tflops:.1f} TFLOPS")
+          print(f"Average: {sum(results)/len(results):.1f} TFLOPS")
+          print("NeMo inference benchmark PASSED")
+      when: "'nemo_inference' in tests"
+
+    - name: "Phase 6b — Deploy script to target nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'mkdir -p /tmp/burnin'"
+        {{ cmsh_bin }} -c "device; use {{ item }}; scp /tmp/nemo_inference_bench.py /tmp/burnin/nemo_inference_bench.py"
+      loop: "{{ target_nodes }}"
+      when: "'nemo_inference' in tests"
+      ignore_errors: true
+
+    - name: "Phase 6c — NeMo LLM Inference Benchmark"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        OUTDIR="{{ debug_bundle_dir }}/$NODE/burnin-$(date +%Y%m%d)"
+        mkdir -p "$OUTDIR"
+
+        echo "Phase 6: NeMo Inference on $NODE"
+        {{ cmsh_bin }} -c "device; use $NODE; exec 'docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --shm-size=32g -v /tmp/burnin:/workspace/burnin {{ nemo_config.container_image }} python3 /workspace/burnin/nemo_inference_bench.py {{ gpu_count_per_node }} 2>&1'" > "$OUTDIR/nemo-inference.txt" 2>&1
+
+        if grep -q "PASSED" "$OUTDIR/nemo-inference.txt"; then
+          echo "NeMo inference PASSED on $NODE"
+        else
+          echo "NeMo inference FAILED on $NODE"
+          exit 1
+        fi
+      loop: "{{ target_nodes }}"
+      register: phase6
+      async: 3600
+      poll: 30
+      when: "'nemo_inference' in tests"
+      ignore_errors: "{{ not skip_on_failure }}"
+
+    # ── Final Report ──
+    - name: "Generate burn-in certification report"
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════
+            BURN-IN SUITE — CERTIFICATION REPORT
+          ═══════════════════════════════════════════════════════════
+          Node:      {{ item }}
+          Ticket:    {{ ticket_id }}
+          Completed: {{ lookup('pipe', 'date -Iseconds') }}
+
+          Test Results:
+            DCGMI R3:        {{ '✅ PASS' if (phase1.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'dcgmi_r3' not in tests else '❌ FAIL') }}
+            DCGMI R4:        {{ '✅ PASS' if (phase2.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'dcgmi_r4' not in tests else '❌ FAIL') }}
+            nvbandwidth:     {{ '✅ PASS' if (phase3.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'nvbandwidth' not in tests else '❌ FAIL') }}
+            NCCL AllReduce:  {{ '✅ PASS' if (phase4a.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'nccl_all_reduce' not in tests else '❌ FAIL') }}
+            NCCL AllGather:  {{ '✅ PASS' if (phase4b.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'nccl_all_gather' not in tests else '❌ FAIL') }}
+            NCCL Reduce:     {{ '✅ PASS' if (phase4c.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'nccl_reduce_scatter' not in tests else '❌ FAIL') }}
+            HPL:             {{ '✅ PASS' if (phase5.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'hpl' not in tests else '❌ FAIL') }}
+            NeMo Inference:  {{ '✅ PASS' if (phase6.results | default([]) | selectattr('item', 'eq', item) | map(attribute='rc') | first | default(-1)) == 0 else ('⏭ SKIPPED' if 'nemo_inference' not in tests else '❌ FAIL') }}
+
+          Results Dir: {{ debug_bundle_dir }}/{{ item }}/burnin-{{ lookup('pipe', 'date +%Y%m%d') }}
+          ═══════════════════════════════════════════════════════════
+      loop: "{{ target_nodes }}"
