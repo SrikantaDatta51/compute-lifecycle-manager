@@ -1,0 +1,63 @@
+---
+- name: BCM Node Lifecycle Management
+  hosts: headnode
+  gather_facts: no
+  vars:
+    target_nodes: "node[001-003]"
+  tasks:
+    # --- Power Operations ---
+    - name: Power on nodes
+      command: "cmsh -c 'device; foreach -n {{ target_nodes }} (power on)'"
+      register: power_on
+      ignore_errors: yes
+      tags: [power, power-on]
+
+    - name: Power off nodes
+      command: "cmsh -c 'device; foreach -n {{ target_nodes }} (power off)'"
+      register: power_off
+      ignore_errors: yes
+      tags: [power, power-off]
+
+    - name: Power reset nodes
+      command: "cmsh -c 'device; foreach -n {{ target_nodes }} (power reset)'"
+      register: power_reset
+      ignore_errors: yes
+      tags: [power, power-reset]
+
+    # --- Provisioning ---
+    - name: Set installmode FULL
+      command: >
+        cmsh -c 'device; foreach -n {{ target_nodes }} (set installmode FULL; commit)'
+      register: installmode
+      tags: [provision]
+
+    - name: Get provisioning status
+      command: "cmsh -c 'device; foreach -n {{ target_nodes }} (get status)'"
+      register: prov_status
+      tags: [provision, status]
+
+    - name: Display provisioning status
+      debug: var=prov_status.stdout_lines
+      tags: [provision, status]
+
+    # --- Slurm Node Control ---
+    - name: Resume nodes in Slurm
+      command: "scontrol update nodename={{ target_nodes }} state=resume reason='ansible'"
+      register: resume
+      ignore_errors: yes
+      tags: [slurm, resume]
+
+    - name: Drain nodes in Slurm
+      command: "scontrol update nodename={{ target_nodes }} state=drain reason='ansible-maintenance'"
+      register: drain
+      ignore_errors: yes
+      tags: [slurm, drain]
+
+    - name: Show final state
+      command: sinfo
+      register: final
+      tags: [always]
+
+    - name: Display result
+      debug: var=final.stdout_lines
+      tags: [always]

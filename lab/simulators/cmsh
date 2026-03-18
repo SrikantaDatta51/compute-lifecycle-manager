@@ -1,0 +1,435 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════
+# Stateful cmsh Simulator for BCM Lab
+# ═══════════════════════════════════════════════════════════════════
+# Maintains persistent state in JSON files under $STATE_DIR.
+# Supports: device, category, partition, softwareimage, and more.
+set -euo pipefail
+
+STATE_DIR="${CMSH_STATE_DIR:-/tmp/bcm-lab-state}"
+mkdir -p "$STATE_DIR"
+
+# ── Initialize default state if not present ──
+init_state() {
+    if [ ! -f "$STATE_DIR/devices.json" ]; then
+        cat > "$STATE_DIR/devices.json" << 'JSON'
+{
+  "cpu-n01": {"status":"UP","ip":"192.168.200.1","mac":"52:54:00:aa:01:01","category":"default","imageprofile":"default","provisioningstatus":"PROVISIONED","bmcipaddress":"192.168.100.1","powerstate":"ON","uptime":"3d 14h"},
+  "cpu-n02": {"status":"UP","ip":"192.168.200.2","mac":"52:54:00:aa:01:02","category":"default","imageprofile":"default","provisioningstatus":"PROVISIONED","bmcipaddress":"192.168.100.2","powerstate":"ON","uptime":"3d 14h"},
+  "gpu-n01": {"status":"UP","ip":"192.168.200.3","mac":"52:54:00:aa:02:01","category":"gpu-compute","imageprofile":"gpu-image","provisioningstatus":"PROVISIONED","bmcipaddress":"192.168.100.3","powerstate":"ON","uptime":"3d 14h"}
+}
+JSON
+    fi
+
+    if [ ! -f "$STATE_DIR/categories.json" ]; then
+        cat > "$STATE_DIR/categories.json" << 'JSON'
+{
+  "default": {"softwareimage":"default-image","nodes":["cpu-n01","cpu-n02"],"roles":["slave"],"kernel":"6.5.0-generic"},
+  "gpu-compute": {"softwareimage":"gpu-image","nodes":["gpu-n01"],"roles":["slave","gpu"],"kernel":"6.5.0-generic"}
+}
+JSON
+    fi
+
+    if [ ! -f "$STATE_DIR/partitions.json" ]; then
+        cat > "$STATE_DIR/partitions.json" << 'JSON'
+{
+  "default": {"wlm":"slurm","nodes":["cpu-n01","cpu-n02","gpu-n01"]}
+}
+JSON
+    fi
+
+    if [ ! -f "$STATE_DIR/softwareimages.json" ]; then
+        cat > "$STATE_DIR/softwareimages.json" << 'JSON'
+{
+  "default-image": {"basepath":"/cm/images/default","kernel":"6.5.0-generic","description":"BCM default image"},
+  "gpu-image": {"basepath":"/cm/images/gpu","kernel":"6.5.0-generic","description":"GPU compute image with CUDA drivers"}
+}
+JSON
+    fi
+
+    if [ ! -f "$STATE_DIR/overlays.json" ]; then
+        cat > "$STATE_DIR/overlays.json" << 'JSON'
+{
+  "base-overlay": {"type":"configuration","description":"Base node configuration","roles":["sshd","ntp"]},
+  "gpu-overlay": {"type":"configuration","description":"GPU node overlay","roles":["nvidia-driver","fabricmanager","dcgm"]}
+}
+JSON
+    fi
+
+    if [ ! -f "$STATE_DIR/nodegroups.json" ]; then
+        cat > "$STATE_DIR/nodegroups.json" << 'JSON'
+{
+  "all-nodes": {"nodes":["cpu-n01","cpu-n02","gpu-n01"]},
+  "cpu-only": {"nodes":["cpu-n01","cpu-n02"]},
+  "gpu-only": {"nodes":["gpu-n01"]}
+}
+JSON
+    fi
+}
+
+init_state
+
+# ── Helper: read JSON with python ──
+py_read() {
+    python3 -c "
+import json, sys
+with open('$STATE_DIR/$1') as f:
+    data = json.load(f)
+$2
+" 2>/dev/null
+}
+
+py_write() {
+    python3 -c "
+import json, sys
+with open('$STATE_DIR/$1') as f:
+    data = json.load(f)
+$2
+with open('$STATE_DIR/$1','w') as f:
+    json.dump(data, f, indent=2)
+print('successfully committed')
+" 2>/dev/null
+}
+
+# ── Parse cmsh -c "cmd1; cmd2; cmd3" style input ──
+parse_and_execute() {
+    local input="$*"
+    # Remove wrapping quotes
+    input="${input#\"}"
+    input="${input%\"}"
+    
+    # Split on semicolons and process
+    local mode=""
+    local current_device=""
+    
+    IFS=';' read -ra CMDS <<< "$input"
+    for raw_cmd in "${CMDS[@]}"; do
+        cmd=$(echo "$raw_cmd" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -z "$cmd" ] && continue
+        
+        case "$cmd" in
+            device|device\ *) 
+                mode="device"
+                [ "$cmd" = "device" ] && continue
+                cmd="${cmd#device }"
+                ;&  # fall through
+            *)
+                case "$mode" in
+                    device)  handle_device "$cmd" ;;
+                    category) handle_category "$cmd" ;;
+                    partition) handle_partition "$cmd" ;;
+                    softwareimage) handle_softwareimage "$cmd" ;;
+                    configurationoverlay) handle_overlay "$cmd" ;;
+                    nodegroup) handle_nodegroup "$cmd" ;;
+                    monitoring) handle_monitoring "$cmd" ;;
+                    *)
+                        # Check for mode-switch commands
+                        case "$cmd" in
+                            category|category\ *) mode="category"; cmd="${cmd#category}"; cmd="${cmd# }"; [ -n "$cmd" ] && handle_category "$cmd" ;;
+                            partition|partition\ *) mode="partition"; cmd="${cmd#partition}"; cmd="${cmd# }"; [ -n "$cmd" ] && handle_partition "$cmd" ;;
+                            softwareimage|softwareimage\ *) mode="softwareimage"; cmd="${cmd#softwareimage}"; cmd="${cmd# }"; [ -n "$cmd" ] && handle_softwareimage "$cmd" ;;
+                            configurationoverlay*) mode="configurationoverlay"; cmd="${cmd#configurationoverlay}"; cmd="${cmd# }"; [ -n "$cmd" ] && handle_overlay "$cmd" ;;
+                            nodegroup*) mode="nodegroup"; cmd="${cmd#nodegroup}"; cmd="${cmd# }"; [ -n "$cmd" ] && handle_nodegroup "$cmd" ;;
+                            monitoring*) mode="monitoring" ;;
+                            foreach\ *)
+                                mode="device"
+                                handle_foreach "${cmd#foreach }"
+                                ;;
+                            *) handle_device "$cmd" ;;
+                        esac
+                        ;;
+                esac
+                ;;
+        esac
+    done
+}
+
+# ── Device Mode ──
+handle_device() {
+    local cmd="$1"
+    case "$cmd" in
+        list)
+            printf "%-14s %-10s %-16s %-12s %-10s\n" "Name" "Status" "IP" "Category" "Power"
+            printf "%-14s %-10s %-16s %-12s %-10s\n" "----------" "------" "----------" "--------" "-----"
+            py_read "devices.json" "
+for name, d in sorted(data.items()):
+    print(f'{name:<14s} {d[\"status\"]:<10s} {d[\"ip\"]:<16s} {d[\"category\"]:<12s} {d[\"powerstate\"]:<10s}')
+"
+            ;;
+        use\ *)
+            current_device="${cmd#use }"
+            export CMSH_CURRENT_DEVICE="$current_device"
+            ;;
+        get\ status)
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            [ -z "$dev" ] && echo "No device selected" && return
+            py_read "devices.json" "print(data.get('$dev',{}).get('status','UNKNOWN'))"
+            ;;
+        get\ provisioningstatus)
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            py_read "devices.json" "print(data.get('$dev',{}).get('provisioningstatus','UNKNOWN'))"
+            ;;
+        get\ bmcipaddress)
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            py_read "devices.json" "print(data.get('$dev',{}).get('bmcipaddress','0.0.0.0'))"
+            ;;
+        set\ status\ *)
+            local val="${cmd#set status }"
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            [ -z "$dev" ] && echo "No device selected" && return
+            py_write "devices.json" "data['$dev']['status']='$val'"
+            ;;
+        set\ category\ *)
+            local val="${cmd#set category }"
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            py_write "devices.json" "data['$dev']['category']='$val'"
+            ;;
+        set\ imageprofile\ *)
+            local val="${cmd#set imageprofile }"
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            py_write "devices.json" "data['$dev']['imageprofile']='$val'"
+            ;;
+        show)
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            [ -z "$dev" ] && echo "No device selected" && return
+            py_read "devices.json" "
+d = data.get('$dev',{})
+for k,v in d.items():
+    label = k.replace('_',' ').title()
+    print(f'  {label:<24s} : {v}')
+"
+            ;;
+        power\ *)
+            local action="${cmd#power }"
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            [ -z "$dev" ] && echo "No device selected" && return
+            case "$action" in
+                on)
+                    py_write "devices.json" "data['$dev']['powerstate']='ON'; data['$dev']['status']='UP'"
+                    echo "$dev: Power ON"
+                    ;;
+                off)
+                    py_write "devices.json" "data['$dev']['powerstate']='OFF'; data['$dev']['status']='DOWN'"
+                    echo "$dev: Power OFF"
+                    ;;
+                reset)
+                    py_write "devices.json" "data['$dev']['powerstate']='ON'; data['$dev']['status']='UP'"
+                    echo "$dev: Power RESET → rebooting"
+                    ;;
+                status)
+                    py_read "devices.json" "print(f'$dev: Power {data[\"$dev\"][\"powerstate\"]}')"
+                    ;;
+            esac
+            ;;
+        exec\ *)
+            local remote_cmd="${cmd#exec }"
+            remote_cmd="${remote_cmd#\'}"
+            remote_cmd="${remote_cmd%\'}"
+            local dev="${CMSH_CURRENT_DEVICE:-}"
+            echo "[exec on $dev] $remote_cmd"
+            # simulate common commands
+            case "$remote_cmd" in
+                *nvidia-smi\ -L*) echo "GPU 0: NVIDIA Virtual GPU (UUID: GPU-abc123)" ;;
+                *nvidia-smi*) echo "Driver: 550.90.12  CUDA: 12.4  GPU: 1x Virtual GPU  Memory: 4096 MiB" ;;
+                *systemctl\ is-active*) echo "active" ;;
+                *ibstat*) echo "Port 1: State: Active  Rate: 200 Gb/sec" ;;
+                *dmesg*) echo "[   0.000] Linux version 6.5.0-generic" ;;
+                *reboot) echo "Rebooting $dev..." ; py_write "devices.json" "data['$dev']['status']='REBOOTING'" ;;
+                *uptime) echo " 14:22:01 up 3 days, 14:22,  0 users,  load average: 0.15, 0.10, 0.05" ;;
+                *free\ -h) printf "              total        used        free\nMem:           62Gi       8.2Gi        54Gi\nSwap:         2.0Gi          0B       2.0Gi\n" ;;
+                *df\ -h) printf "Filesystem      Size  Used Avail Use%%\n/dev/sda1       457G   42G  392G  10%%\n" ;;
+                *lscpu) echo "CPU(s): 4  Model: Intel Xeon  MHz: 2100.00" ;;
+                *lspci) echo "00:02.0 VGA compatible controller: NVIDIA" ;;
+                *ip\ addr*) echo "1: lo: inet 127.0.0.1/8  2: eth0: inet ${dev}" ;;
+                *wc\ -l*) echo "1" ;;
+                *grep*) echo "0" ;;
+                *nvsm\ dump*) echo "NVSM System Dump — $(date)\nBMC FW: 01.02.03\nBIOS: 2.1.0\nGPU 0: Healthy\nPSU 0: OK\nFans: Normal\nTemp: 42C" ;;
+                *nvsm\ show\ health*) echo "System Health: HEALTHY\nGPU: OK\nNetwork: OK\nStorage: OK\nPower: OK" ;;
+                *) eval "$remote_cmd" 2>/dev/null || echo "(command output for: $remote_cmd)" ;;
+            esac
+            ;;
+        commit)
+            echo "successfully committed"
+            ;;
+        *)
+            # Try as "use X; ..." combo
+            if [[ "$cmd" == *"use"* ]]; then
+                local dev_name=$(echo "$cmd" | grep -oP 'use \K\S+')
+                export CMSH_CURRENT_DEVICE="$dev_name"
+            fi
+            ;;
+    esac
+}
+
+handle_foreach() {
+    local pattern="$1"
+    # "* (get status)" format
+    local func=$(echo "$pattern" | grep -oP '\(\K[^)]+' || echo "get status")
+    py_read "devices.json" "
+for name, d in sorted(data.items()):
+    val = d.get('status','UNKNOWN')
+    print(f'{name}: {val}')
+"
+}
+
+# ── Category Mode ──
+handle_category() {
+    local cmd="$1"
+    case "$cmd" in
+        list)
+            printf "%-20s %-40s %-20s\n" "Name" "Nodes" "Software Image"
+            printf "%-20s %-40s %-20s\n" "----------------" "--------------------" "---------------"
+            py_read "categories.json" "
+for name, c in sorted(data.items()):
+    nodes = ', '.join(c.get('nodes',[]))
+    img = c.get('softwareimage','')
+    print(f'{name:<20s} {nodes:<40s} {img:<20s}')
+"
+            ;;
+        use\ *)
+            export CMSH_CURRENT_CATEGORY="${cmd#use }"
+            ;;
+        add\ *)
+            local name="${cmd#add }"
+            py_write "categories.json" "data['$name']={'softwareimage':'default-image','nodes':[],'roles':['slave'],'kernel':'6.5.0-generic'}"
+            echo "Category '$name' created"
+            ;;
+        show)
+            local cat="${CMSH_CURRENT_CATEGORY:-}"
+            py_read "categories.json" "
+c = data.get('$cat',{})
+for k,v in c.items():
+    print(f'  {k:<20s}: {v}')
+"
+            ;;
+        set\ *)
+            echo "successfully committed"
+            ;;
+        commit)
+            echo "successfully committed"
+            ;;
+    esac
+}
+
+# ── Partition Mode ──
+handle_partition() {
+    local cmd="$1"
+    case "$cmd" in
+        list)
+            printf "%-14s %-30s %-10s\n" "Name" "Nodes" "WLM"
+            printf "%-14s %-30s %-10s\n" "----------" "---------------------" "------"
+            py_read "partitions.json" "
+for name, p in sorted(data.items()):
+    nodes = ', '.join(p.get('nodes',[]))
+    wlm = p.get('wlm','none')
+    print(f'{name:<14s} {nodes:<30s} {wlm:<10s}')
+"
+            ;;
+        use\ *)
+            export CMSH_CURRENT_PARTITION="${cmd#use }"
+            ;;
+        add\ *)
+            local name="${cmd#add }"
+            py_write "partitions.json" "data['$name']={'wlm':'slurm','nodes':[]}"
+            echo "Partition '$name' created"
+            ;;
+        set\ wlm\ *)
+            echo "successfully committed"
+            ;;
+        set\ default\ *)
+            echo "successfully committed"
+            ;;
+        set\ oversubscribe\ *)
+            echo "successfully committed"
+            ;;
+        set\ maximumtime\ *)
+            echo "successfully committed"
+            ;;
+        append\ nodes\ *)
+            local nodes="${cmd#append nodes }"
+            local part="${CMSH_CURRENT_PARTITION:-default}"
+            py_write "partitions.json" "
+nodes_str='$nodes'
+new_nodes = [n.strip() for n in nodes_str.split(',')]
+if '$part' in data:
+    data['$part']['nodes'] = list(set(data['$part']['nodes'] + new_nodes))
+"
+            ;;
+        commit)
+            echo "successfully committed"
+            ;;
+        *)
+            echo "successfully committed"
+            ;;
+    esac
+}
+
+# ── Software Image Mode ──
+handle_softwareimage() {
+    local cmd="$1"
+    case "$cmd" in
+        list)
+            printf "%-20s %-30s %-20s\n" "Name" "Path" "Kernel"
+            printf "%-20s %-30s %-20s\n" "---------------" "---------------------" "---------------"
+            py_read "softwareimages.json" "
+for name, s in sorted(data.items()):
+    print(f'{name:<20s} {s[\"basepath\"]:<30s} {s[\"kernel\"]:<20s}')
+"
+            ;;
+        *)
+            echo "successfully committed"
+            ;;
+    esac
+}
+
+# ── Configuration Overlay Mode ──
+handle_overlay() {
+    local cmd="$1"
+    case "$cmd" in
+        list)
+            printf "%-20s %-20s %-40s\n" "Name" "Type" "Roles"
+            printf "%-20s %-20s %-40s\n" "---------------" "----------" "--------------------"
+            py_read "overlays.json" "
+for name, o in sorted(data.items()):
+    roles = ', '.join(o.get('roles',[]))
+    print(f'{name:<20s} {o[\"type\"]:<20s} {roles:<40s}')
+"
+            ;;
+        *)
+            echo "successfully committed"
+            ;;
+    esac
+}
+
+# ── Node Group Mode ──
+handle_nodegroup() {
+    local cmd="$1"
+    case "$cmd" in
+        list)
+            printf "%-20s %-40s\n" "Name" "Nodes"
+            printf "%-20s %-40s\n" "---------------" "--------------------"
+            py_read "nodegroups.json" "
+for name, g in sorted(data.items()):
+    nodes = ', '.join(g.get('nodes',[]))
+    print(f'{name:<20s} {nodes:<40s}')
+"
+            ;;
+        *)
+            echo "successfully committed"
+            ;;
+    esac
+}
+
+# ── Monitoring Mode ──
+handle_monitoring() {
+    local cmd="$1"
+    echo "Monitoring data available — use 'device; use <node>; get status' for per-node health"
+}
+
+# ── Entry Point ──
+if [ "$1" = "-c" ]; then
+    shift
+    parse_and_execute "$*"
+else
+    echo "BCM cmsh simulator — use -c \"command\" format"
+fi

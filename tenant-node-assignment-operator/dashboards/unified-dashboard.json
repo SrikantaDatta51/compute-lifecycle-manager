@@ -1,0 +1,613 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "description": "Unified dashboard: operator health + workflow state timeline + step durations",
+    "editable": true,
+    "panels": [
+        {
+            "title": "",
+            "type": "text",
+            "gridPos": {
+                "h": 2,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "options": {
+                "mode": "markdown",
+                "content": "# Compute Platform Operator — Unified Dashboard\nOperator health metrics + per-step workflow state timeline + step timing analysis"
+            }
+        },
+        {
+            "title": "Reconciliation Rate",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 7,
+                "w": 8,
+                "x": 0,
+                "y": 2
+            },
+            "targets": [
+                {
+                    "expr": "rate(controller_runtime_reconcile_total{controller=\"tenantnodeassignment\"}[5m])",
+                    "legendFormat": "{{result}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "fillOpacity": 15
+                    }
+                }
+            }
+        },
+        {
+            "title": "Reconciliation Duration (p95 / p50)",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 7,
+                "w": 8,
+                "x": 8,
+                "y": 2
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, rate(controller_runtime_reconcile_time_seconds_bucket{controller=\"tenantnodeassignment\"}[5m]))",
+                    "legendFormat": "p95"
+                },
+                {
+                    "expr": "histogram_quantile(0.50, rate(controller_runtime_reconcile_time_seconds_bucket{controller=\"tenantnodeassignment\"}[5m]))",
+                    "legendFormat": "p50"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "color": {
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "fillOpacity": 10
+                    }
+                }
+            }
+        },
+        {
+            "title": "Go Goroutines",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 7,
+                "w": 8,
+                "x": 16,
+                "y": 2
+            },
+            "targets": [
+                {
+                    "expr": "go_goroutines",
+                    "legendFormat": "goroutines"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "fixedColor": "blue",
+                        "mode": "fixed"
+                    },
+                    "custom": {
+                        "fillOpacity": 10
+                    }
+                }
+            }
+        },
+        {
+            "title": "Queue Depth",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 0,
+                "y": 9
+            },
+            "targets": [
+                {
+                    "expr": "workqueue_depth{name=\"tenantnodeassignment\"}",
+                    "legendFormat": "depth"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 5
+                            },
+                            {
+                                "color": "red",
+                                "value": 20
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "title": "Errors",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 4,
+                "y": 9
+            },
+            "targets": [
+                {
+                    "expr": "rate(controller_runtime_reconcile_total{controller=\"tenantnodeassignment\",result=\"error\"}[5m])",
+                    "legendFormat": "err/s"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.1
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "title": "Leader",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 8,
+                "y": 9
+            },
+            "targets": [
+                {
+                    "expr": "leader_election_master_status",
+                    "legendFormat": "{{name}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "text": "STANDBY"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "1": {
+                                    "text": "LEADER"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "yellow",
+                                "value": null
+                            },
+                            {
+                                "color": "green",
+                                "value": 1
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "title": "CRs by Phase",
+            "type": "piechart",
+            "gridPos": {
+                "h": 4,
+                "w": 4,
+                "x": 12,
+                "y": 9
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_cr_phase_total",
+                    "legendFormat": "{{phase}}"
+                }
+            ]
+        },
+        {
+            "title": "Memory",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 16,
+                "y": 9
+            },
+            "targets": [
+                {
+                    "expr": "go_memstats_alloc_bytes",
+                    "legendFormat": "alloc"
+                },
+                {
+                    "expr": "go_memstats_sys_bytes",
+                    "legendFormat": "sys"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "bytes",
+                    "custom": {
+                        "fillOpacity": 10
+                    }
+                }
+            }
+        },
+        {
+            "title": "",
+            "type": "text",
+            "gridPos": {
+                "h": 2,
+                "w": 24,
+                "x": 0,
+                "y": 13
+            },
+            "options": {
+                "mode": "markdown",
+                "content": "---\n## Workflow State Timeline — Per-Step Visualization"
+            }
+        },
+        {
+            "title": "Step States — assign-gpu-01",
+            "description": "Green=completed, Orange=waiting for external signal, Blue=running, Gray=pending, Red=failed",
+            "type": "state-timeline",
+            "gridPos": {
+                "h": 9,
+                "w": 24,
+                "x": 0,
+                "y": 15
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_step_status{cr=\"assign-gpu-01\"}",
+                    "legendFormat": "{{step}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "fillOpacity": 80,
+                        "lineWidth": 0
+                    },
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "text": "PENDING",
+                                    "color": "#585858"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "1": {
+                                    "text": "RUNNING",
+                                    "color": "#3274D9"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "2": {
+                                    "text": "COMPLETED",
+                                    "color": "#73BF69"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "3": {
+                                    "text": "WAITING",
+                                    "color": "#FF9830"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "4": {
+                                    "text": "FAILED",
+                                    "color": "#F2495C"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "#585858",
+                                "value": null
+                            },
+                            {
+                                "color": "#3274D9",
+                                "value": 1
+                            },
+                            {
+                                "color": "#73BF69",
+                                "value": 2
+                            },
+                            {
+                                "color": "#FF9830",
+                                "value": 3
+                            },
+                            {
+                                "color": "#F2495C",
+                                "value": 4
+                            }
+                        ]
+                    },
+                    "color": {
+                        "mode": "thresholds"
+                    }
+                }
+            },
+            "options": {
+                "showValue": "always",
+                "rowHeight": 0.85,
+                "mergeValues": true,
+                "alignValue": "center"
+            }
+        },
+        {
+            "title": "Step Duration (seconds)",
+            "description": "Time per step. Longest bar = bottleneck. wait-agent-ready is typically slowest (waiting for external signal).",
+            "type": "bargauge",
+            "gridPos": {
+                "h": 7,
+                "w": 12,
+                "x": 0,
+                "y": 24
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_step_duration_seconds{cr=\"assign-gpu-01\"}",
+                    "legendFormat": "{{step}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 5
+                            },
+                            {
+                                "color": "red",
+                                "value": 30
+                            }
+                        ]
+                    },
+                    "color": {
+                        "mode": "thresholds"
+                    }
+                }
+            },
+            "options": {
+                "orientation": "horizontal",
+                "displayMode": "gradient",
+                "showUnfilled": true,
+                "valueMode": "text"
+            }
+        },
+        {
+            "title": "Current Step",
+            "type": "stat",
+            "gridPos": {
+                "h": 3,
+                "w": 6,
+                "x": 12,
+                "y": 24
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_workflow_current_step",
+                    "legendFormat": "Step"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "text": "Not Started"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "1": {
+                                    "text": "① validate-spec"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "2": {
+                                    "text": "② fetch-node"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "3": {
+                                    "text": "③ set-owner-label"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "4": {
+                                    "text": "④ wait-agent-ready"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "5": {
+                                    "text": "⑤ update-configmap"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "#585858",
+                                "value": null
+                            },
+                            {
+                                "color": "blue",
+                                "value": 1
+                            },
+                            {
+                                "color": "green",
+                                "value": 5
+                            }
+                        ]
+                    },
+                    "color": {
+                        "mode": "thresholds"
+                    }
+                }
+            }
+        },
+        {
+            "title": "Reconciliations During Workflow",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 7,
+                "w": 6,
+                "x": 18,
+                "y": 24
+            },
+            "targets": [
+                {
+                    "expr": "rate(controller_runtime_reconcile_total{controller=\"tenantnodeassignment\",result=\"success\"}[1m])",
+                    "legendFormat": "success"
+                },
+                {
+                    "expr": "rate(controller_runtime_reconcile_total{controller=\"tenantnodeassignment\",result=\"requeue\"}[1m])",
+                    "legendFormat": "requeue (waiting)"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "custom": {
+                        "fillOpacity": 15
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "success"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "fixedColor": "green",
+                                    "mode": "fixed"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "requeue (waiting)"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "fixedColor": "orange",
+                                    "mode": "fixed"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "title": "Workflow Steps Reference",
+            "type": "text",
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 12,
+                "y": 27
+            },
+            "options": {
+                "mode": "markdown",
+                "content": "| # | Step | Time |\n|---|------|------|\n| ① | validate-spec | <1s |\n| ② | fetch-node | <1s |\n| ③ | set-owner-label | <2s |\n| ④ | wait-agent ⏳ | 10-30s |\n| ⑤ | update-configmap | <1s |"
+            }
+        }
+    ],
+    "schemaVersion": 39,
+    "tags": [
+        "operator",
+        "workflow",
+        "compute-platform"
+    ],
+    "time": {
+        "from": "now-15m",
+        "to": "now"
+    },
+    "refresh": "5s",
+    "title": "Compute Platform Operator — Unified",
+    "uid": "compute-platform-unified",
+    "version": 1
+}

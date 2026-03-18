@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════
+# Stateful squeue / sbatch Simulators
+# ═══════════════════════════════════════════════════════════════════
+STATE_DIR="${CMSH_STATE_DIR:-/tmp/bcm-lab-state}"
+JOBS_FILE="$STATE_DIR/slurm_jobs.json"
+[ ! -f "$JOBS_FILE" ] && echo '{}' > "$JOBS_FILE"
+
+SCRIPT_NAME=$(basename "$0")
+
+case "$SCRIPT_NAME" in
+    squeue)
+        # Parse args
+        NODE_FILTER="" LONG=false
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -l) LONG=true ;;
+                -h) ;; # no header
+                -w) shift; NODE_FILTER="$1" ;;
+                -u) shift ;; # user filter
+            esac
+            shift
+        done
+        
+        python3 -c "
+import json
+with open('$JOBS_FILE') as f: data = json.load(f)
+if not data:
+    print('  No jobs in queue')
+else:
+    print(f'{\"JOBID\":<10s} {\"PARTITION\":<12s} {\"NAME\":<20s} {\"USER\":<10s} {\"STATE\":<10s} {\"NODE\":<10s}')
+    for jid, j in sorted(data.items()):
+        node_filter = '$NODE_FILTER'
+        if node_filter and j.get('node','') != node_filter:
+            continue
+        print(f'{jid:<10s} {j[\"partition\"]:<12s} {j[\"name\"]:<20s} {j[\"user\"]:<10s} {j[\"state\"]:<10s} {j.get(\"node\",\"N/A\"):<10s}')
+"
+        ;;
+    sbatch)
+        # Submit a job - assign job ID
+        JOB_SCRIPT="${!#}"
+        JOB_ID=$((1000 + RANDOM % 9000))
+        
+        python3 -c "
+import json
+with open('$JOBS_FILE') as f: data = json.load(f)
+data['$JOB_ID'] = {
+    'name': '$(basename "${JOB_SCRIPT}" .sh)',
+    'partition': 'cpu',
+    'user': '$(whoami)',
+    'state': 'COMPLETED',
+    'node': 'cpu-n01',
+    'exit_code': 0
+}
+with open('$JOBS_FILE','w') as f: json.dump(data, f, indent=2)
+"
+        echo "Submitted batch job $JOB_ID"
+        
+        # Actually run the script if it exists
+        if [ -f "$JOB_SCRIPT" ]; then
+            export SLURM_JOB_ID=$JOB_ID
+            export SLURM_NODELIST="cpu-n01"
+            export SLURM_CPUS_ON_NODE=4
+            bash "$JOB_SCRIPT" > "/tmp/slurm-test-${JOB_ID}.out" 2>&1 || true
+        fi
+        ;;
+esac

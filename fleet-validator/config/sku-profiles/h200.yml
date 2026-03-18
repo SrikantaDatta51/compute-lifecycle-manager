@@ -1,0 +1,50 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# SKU Profile — NVIDIA DGX H200
+# ═══════════════════════════════════════════════════════════════════
+# Performance thresholds for DGX H200 systems.
+# GPU: H200 141GB HBM3e × 8
+# Interconnect: NVLink 4 (900 GB/s bidirectional per GPU)
+# Network: 8× ConnectX-7 400G InfiniBand
+
+sku_name: h200
+gpu_model: "H200"
+gpu_memory_gb: 141
+gpu_count: 8
+nvlink_generation: 4
+nvlink_bw_per_gpu_gbps: 900
+
+# ── NCCL Bandwidth Thresholds (GB/s) ──
+nccl_allreduce_min_busbw_gbps: 300
+nccl_allgather_min_busbw_gbps: 280
+nccl_reducescatter_min_busbw_gbps: 280
+nccl_sendrecv_min_busbw_gbps: 150
+
+# ── Multi-Node NCCL Thresholds ──
+nccl_multinode_allreduce_min_busbw_gbps: 180
+nccl_multinode_allgather_min_busbw_gbps: 160
+nccl_multinode_reducescatter_min_busbw_gbps: 160
+
+# ── nvbandwidth Thresholds (GB/s) ──
+nvbw_h2d_min_gbps: 25
+nvbw_d2d_min_gbps: 800
+nvbw_bidir_min_gbps: 700
+nvbw_all_to_one_min_gbps: 200
+
+# ── HPL Thresholds ──
+hpl_min_tflops: 30
+
+# ── Containers ──
+nccl_container_image: "nvcr.io/nvidia/pytorch:24.04-py3"
+nccl_tests_path: "/opt/nccl_tests/build"
+hpl_container_image: "nvcr.io/nvidia/hpc-benchmarks:24.03"
+nemo_container_image: "nvcr.io/nvidia/nemo:24.03.01"
+
+# ── InfiniBand Device Mapping ──
+ib_devices: "mlx5_0,mlx5_1,mlx5_3,mlx5_4,mlx5_5,mlx5_9,mlx5_10,mlx5_11"
+ucx_device: "mlx5_0:1"
+nccl_socket_ifname: "bond0"
+
+# ── Temperature Thresholds ──
+gpu_temp_warning_c: 80
+gpu_temp_critical_c: 90

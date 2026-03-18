@@ -1,0 +1,59 @@
+#!/usr/bin/expect -f
+set timeout 30
+log_user 1
+
+spawn script -qfc "sudo virsh console bcm-head" /dev/null
+
+expect {
+    "password" { send "user\r"; exp_continue }
+    "Escape character" { sleep 2; send "\r" }
+}
+
+sleep 3
+send "\r"
+sleep 2
+
+# Wait for login prompt
+expect {
+    "login:" { }
+    timeout { send "\r"; expect "login:" }
+}
+
+# Login as root with empty password
+send "root\r"
+expect "assword:"
+send "\r"
+
+# Wait for shell prompt
+expect {
+    "#" { }
+    "incorrect" { puts "LOGIN FAILED"; exit 1 }
+    timeout { puts "TIMEOUT"; exit 1 }
+}
+
+# Run commands
+set commands {
+    "echo '=== HOSTNAME ==='; hostname"
+    "echo '=== IP ADDR ==='; ip -4 addr show | grep 'inet '"
+    "echo '=== CMSH VERSION ==='; cmsh --version 2>/dev/null || echo no-cmsh"
+    "echo '=== DEVICE LIST ==='; cmsh -c 'device list' 2>/dev/null || echo no-devices"
+    "echo '=== CATEGORY LIST ==='; cmsh -c 'category list' 2>/dev/null || echo no-categories"
+    "echo '=== PARTITION LIST ==='; cmsh -c 'partition list' 2>/dev/null || echo no-partitions"
+    "echo '=== SOFTWAREIMAGE LIST ==='; cmsh -c 'softwareimage list' 2>/dev/null || echo no-images"
+    "echo '=== OVERLAY LIST ==='; cmsh -c 'configurationoverlay list' 2>/dev/null || echo no-overlays"
+    "echo '=== SINFO ==='; sinfo 2>/dev/null || echo no-sinfo"
+    "echo '=== SINFO VERSION ==='; sinfo --version 2>/dev/null || echo no-slurm"
+    "echo '=== SCONTROL NODES ==='; scontrol show nodes 2>/dev/null | head -30 || echo no-scontrol"
+    "echo '=== CMD STATUS ==='; systemctl status cmd 2>/dev/null | head -10 || echo no-cmd"
+    "echo '=== ALL DONE ==='"
+}
+
+foreach cmd $commands {
+    send "$cmd\r"
+    expect "#"
+    sleep 1
+}
+
+# Disconnect
+send "\035"
+sleep 1

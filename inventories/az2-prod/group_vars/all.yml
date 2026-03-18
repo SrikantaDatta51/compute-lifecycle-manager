@@ -1,0 +1,18 @@
+---
+env_name: az2-prod
+env_description: "AZ2 Production"
+bcm_version: "11.0"
+bcm_head_ssh_ip: "10.40.100.1"
+bcm_head_ip: "10.40.200.254"
+bcm_internal_network: "internalnet"
+bcm_domain: "az2.prod.corp.internal"
+
+dns_nameservers: ["10.40.200.254", "10.0.0.53"]
+dns_search_domains: ["az2.prod.corp.internal", "corp.internal"]
+ntp_servers: ["ntp1.corp.internal", "ntp2.corp.internal"]
+
+bcm_categories: []
+slurm_partition: "az2-prod"
+bcm_image: "ubuntu24-base"
+enable_health_checks: true
+health_check_services: [cmd, slurmctld, slurmdbd, dhcpd]

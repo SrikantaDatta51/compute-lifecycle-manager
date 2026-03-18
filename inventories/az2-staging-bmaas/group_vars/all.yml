@@ -1,0 +1,35 @@
+---
+env_name: az2-staging-bmaas
+env_description: "AZ2 BMaaS Staging — 1 BCM Head + 3 CPU + 1 GPU"
+
+bcm_version: "11.0"
+bcm_head_ssh_ip: "10.10.100.1"
+bcm_head_ip: "10.10.200.254"
+bcm_internal_network: "internalnet"
+bcm_external_network: "externalnet"
+bcm_domain: "stg-bmaas.corp.internal"
+
+dns_nameservers:
+  - "10.10.200.254"
+  - "10.0.0.53"
+dns_search_domains:
+  - "stg-bmaas.corp.internal"
+
+ntp_servers:
+  - "ntp.corp.internal"
+
+bcm_categories:
+  - name: cpu-compute
+    image: ubuntu24-base
+    nodes: [stg-cpu-001, stg-cpu-002, stg-cpu-003]
+  - name: gpu-compute
+    image: ubuntu24-gpu
+    nodes: [stg-gpu-001]
+    kernel_params: "iommu=pt nvidia.NVreg_EnableGpuFirmware=0"
+
+slurm_partition: "staging"
+slurm_default_partition: true
+bcm_image: "ubuntu24-base"
+
+enable_health_checks: true
+health_check_services: [cmd, slurmctld, slurmdbd, dhcpd]

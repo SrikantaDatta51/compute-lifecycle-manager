@@ -1,0 +1,127 @@
+---
+- name: BCM Debug Bundle Collection
+  hosts: headnode
+  gather_facts: yes
+  vars:
+    bundle_dir: "/tmp/bcm-debug-{{ ansible_date_time.iso8601_basic_short }}"
+  tasks:
+    - name: Create bundle directory
+      file:
+        path: "{{ bundle_dir }}"
+        state: directory
+      tags: [setup]
+
+    - name: Collect BCM device list
+      command: cmsh -c 'device list'
+      register: devices
+      tags: [bcm]
+
+    - name: Collect BCM device status
+      command: cmsh -c 'device status'
+      register: device_status
+      tags: [bcm]
+
+    - name: Collect category info
+      command: cmsh -c 'category list'
+      register: categories
+      tags: [bcm]
+
+    - name: Collect overlay info
+      command: cmsh -c 'configurationoverlay list'
+      register: overlays
+      tags: [bcm]
+
+    - name: Collect network info
+      command: cmsh -c 'network list'
+      register: networks
+      tags: [bcm]
+
+    - name: Collect Slurm info
+      command: sinfo -l
+      register: sinfo
+      tags: [slurm]
+
+    - name: Collect Slurm node details
+      command: scontrol show nodes
+      register: nodes
+      tags: [slurm]
+
+    - name: Collect Slurm queue
+      command: squeue -l
+      register: queue
+      tags: [slurm]
+
+    - name: Collect service status
+      command: systemctl is-active cmd slurmctld slurmdbd
+      register: services
+      tags: [services]
+
+    - name: Collect cmd daemon logs
+      command: journalctl -u cmd --no-pager -n 50
+      register: cmd_logs
+      tags: [logs]
+
+    - name: Collect DHCP logs
+      command: journalctl -u dhcpd --no-pager -n 30
+      register: dhcp_logs
+      tags: [logs]
+
+    - name: Collect dmesg
+      command: dmesg --time-format iso -T
+      register: dmesg_out
+      ignore_errors: yes
+      tags: [logs]
+
+    - name: Collect disk usage
+      command: df -h
+      register: disk
+      tags: [system]
+
+    - name: Collect memory usage
+      command: free -h
+      register: memory
+      tags: [system]
+
+    - name: Write debug bundle
+      copy:
+        content: |
+          === BCM DEBUG BUNDLE ===
+          Generated: {{ ansible_date_time.iso8601 }}
+          Host: {{ ansible_hostname }}
+
+          === DEVICES ===
+          {{ devices.stdout }}
+
+          === CATEGORIES ===
+          {{ categories.stdout }}
+
+          === OVERLAYS ===
+          {{ overlays.stdout }}
+
+          === NETWORKS ===
+          {{ networks.stdout }}
+
+          === SLURM INFO ===
+          {{ sinfo.stdout }}
+
+          === SLURM NODES ===
+          {{ nodes.stdout }}
+
+          === SLURM QUEUE ===
+          {{ queue.stdout }}
+
+          === SERVICES ===
+          {{ services.stdout }}
+
+          === DISK ===
+          {{ disk.stdout }}
+
+          === MEMORY ===
+          {{ memory.stdout }}
+        dest: "{{ bundle_dir }}/debug-bundle.txt"
+      tags: [bundle]
+
+    - name: Display bundle path
+      debug:
+        msg: "Debug bundle saved to {{ bundle_dir }}/debug-bundle.txt"
+      tags: [bundle]

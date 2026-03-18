@@ -1,0 +1,429 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "description": "Workflow state timeline showing per-step status changes and time between transitions for each CR",
+    "editable": true,
+    "panels": [
+        {
+            "title": "Workflow State Timeline — assign-gpu-01",
+            "description": "Shows what state each step is in over time. Green=completed, Yellow=waiting for external signal, Blue=running, Gray=pending",
+            "type": "state-timeline",
+            "gridPos": {
+                "h": 10,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_step_status{cr=\"assign-gpu-01\"}",
+                    "legendFormat": "{{step}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "fillOpacity": 80,
+                        "lineWidth": 0
+                    },
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "text": "PENDING",
+                                    "color": "#585858"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "1": {
+                                    "text": "RUNNING",
+                                    "color": "#3274D9"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "2": {
+                                    "text": "COMPLETED",
+                                    "color": "#73BF69"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "3": {
+                                    "text": "WAITING",
+                                    "color": "#FF9830"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "4": {
+                                    "text": "FAILED",
+                                    "color": "#F2495C"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "#585858",
+                                "value": null
+                            },
+                            {
+                                "color": "#3274D9",
+                                "value": 1
+                            },
+                            {
+                                "color": "#73BF69",
+                                "value": 2
+                            },
+                            {
+                                "color": "#FF9830",
+                                "value": 3
+                            },
+                            {
+                                "color": "#F2495C",
+                                "value": 4
+                            }
+                        ]
+                    },
+                    "color": {
+                        "mode": "thresholds"
+                    }
+                }
+            },
+            "options": {
+                "showValue": "always",
+                "rowHeight": 0.85,
+                "mergeValues": true,
+                "alignValue": "center"
+            }
+        },
+        {
+            "title": "Step Duration (seconds)",
+            "description": "Time taken for each step to complete. Longer bars = slower steps. Look for steps that take disproportionately long — they may indicate bottlenecks.",
+            "type": "bargauge",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 10
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_step_duration_seconds{cr=\"assign-gpu-01\"}",
+                    "legendFormat": "{{step}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 5
+                            },
+                            {
+                                "color": "red",
+                                "value": 30
+                            }
+                        ]
+                    },
+                    "color": {
+                        "mode": "thresholds"
+                    }
+                }
+            },
+            "options": {
+                "orientation": "horizontal",
+                "displayMode": "gradient",
+                "showUnfilled": true,
+                "valueMode": "text"
+            }
+        },
+        {
+            "title": "Current Workflow Step",
+            "description": "Which step of the workflow is currently executing (1-5).",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 12,
+                "y": 10
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_workflow_current_step",
+                    "legendFormat": "Step"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "text": "Not Started"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "1": {
+                                    "text": "① validate-spec"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "2": {
+                                    "text": "② fetch-node"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "3": {
+                                    "text": "③ set-owner-label"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "4": {
+                                    "text": "④ wait-agent-ready"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "5": {
+                                    "text": "⑤ update-configmap"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "#585858",
+                                "value": null
+                            },
+                            {
+                                "color": "blue",
+                                "value": 1
+                            },
+                            {
+                                "color": "green",
+                                "value": 5
+                            }
+                        ]
+                    },
+                    "color": {
+                        "mode": "thresholds"
+                    }
+                }
+            }
+        },
+        {
+            "title": "CR Phase",
+            "description": "Current CR phase: Pending → LabelApplied → AwaitingNodeAgent → Ready",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 18,
+                "y": 10
+            },
+            "targets": [
+                {
+                    "expr": "compute_platform_cr_phase_total{phase=\"Ready\"} * 4 + compute_platform_cr_phase_total{phase=\"AwaitingNodeAgent\"} * 3 + compute_platform_cr_phase_total{phase=\"LabelApplied\"} * 2 + compute_platform_cr_phase_total{phase=\"Pending\"} * 1",
+                    "legendFormat": "Phase"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "mappings": [
+                        {
+                            "options": {
+                                "0": {
+                                    "text": "Not Started"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "1": {
+                                    "text": "Pending"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "2": {
+                                    "text": "LabelApplied"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "3": {
+                                    "text": "AwaitingNodeAgent"
+                                }
+                            },
+                            "type": "value"
+                        },
+                        {
+                            "options": {
+                                "4": {
+                                    "text": "✅ READY"
+                                }
+                            },
+                            "type": "value"
+                        }
+                    ],
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "#585858",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 1
+                            },
+                            {
+                                "color": "blue",
+                                "value": 2
+                            },
+                            {
+                                "color": "orange",
+                                "value": 3
+                            },
+                            {
+                                "color": "green",
+                                "value": 4
+                            }
+                        ]
+                    },
+                    "color": {
+                        "mode": "thresholds"
+                    }
+                }
+            }
+        },
+        {
+            "title": "Reconciliations During Workflow",
+            "description": "How many reconcile loops ran during the workflow execution. Requeues indicate the operator is polling for an external signal.",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            },
+            "targets": [
+                {
+                    "expr": "rate(controller_runtime_reconcile_total{controller=\"tenantnodeassignment\",result=\"success\"}[1m])",
+                    "legendFormat": "success"
+                },
+                {
+                    "expr": "rate(controller_runtime_reconcile_total{controller=\"tenantnodeassignment\",result=\"requeue\"}[1m])",
+                    "legendFormat": "requeue (waiting)"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ops",
+                    "custom": {
+                        "fillOpacity": 15
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "success"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "fixedColor": "green",
+                                    "mode": "fixed"
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "requeue (waiting)"
+                        },
+                        "properties": [
+                            {
+                                "id": "color",
+                                "value": {
+                                    "fixedColor": "orange",
+                                    "mode": "fixed"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "title": "Workflow Legend",
+            "type": "text",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 18
+            },
+            "options": {
+                "mode": "markdown",
+                "content": "## Node Assignment Workflow\n\n| # | Step | What Happens | Expected Duration |\n|---|------|-------------|-------------------|\n| ① | `validate-spec` | Check CR has owner + node | <1s |\n| ② | `fetch-node` | Get node from K8s API | <1s |\n| ③ | `set-owner-label` | Label node with owner | <2s |\n| ④ | `wait-agent-ready` | Poll for on-node agent ⏳ | 10-30s |\n| ⑤ | `update-configmap` | Record readiness | <1s |\n\n**Colors**: 🟢 Completed · 🟠 Waiting for signal · 🔵 Running · ⬜ Pending · 🔴 Failed"
+            }
+        }
+    ],
+    "schemaVersion": 39,
+    "tags": [
+        "operator",
+        "workflow",
+        "compute-platform"
+    ],
+    "time": {
+        "from": "now-5m",
+        "to": "now"
+    },
+    "title": "Compute Platform — Workflow State Timeline",
+    "uid": "workflow-state-timeline",
+    "version": 1
+}

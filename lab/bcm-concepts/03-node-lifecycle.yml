@@ -1,0 +1,121 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 03 — Node Status & Lifecycle
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - BCM nodes cycle through states: UP → CLOSED → DOWN → INSTALL → UP
+#   - UP:      Node is active and accepting work
+#   - CLOSED:  Node is up but won't accept new work (maintenance)
+#   - DOWN:    Node is powered off or unreachable
+#   - INSTALL: Node is being provisioned/re-imaged
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 03 — Node Status & Lifecycle"
+  hosts: bcm_headnodes
+  gather_facts: false
+
+  tasks:
+    - name: "CONCEPT: Node lifecycle states"
+      ansible.builtin.debug:
+        msg: |
+          ── BCM Node States ──
+          
+              ┌─────────┐
+              │ INSTALL  │ ← PXE booting / re-imaging
+              └────┬─────┘
+                   ↓
+              ┌─────────┐
+              │   UP     │ ← Active, accepting work
+              └────┬─────┘
+                   ↓ (maintenance)
+              ┌─────────┐
+              │ CLOSED   │ ← Running but no new work
+              └────┬─────┘
+                   ↓ (power off)
+              ┌─────────┐
+              │  DOWN    │ ← Powered off / unreachable
+              └─────────┘
+
+    - name: "ACTION: Check initial status of all nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get status"
+      loop: "{{ all_nodes }}"
+      register: initial_status
+      changed_when: false
+
+    - name: "OUTPUT: Initial state"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | trim }}"
+      loop: "{{ initial_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "ACTION: Set cpu-n01 to CLOSED (maintenance mode)"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set status CLOSED; commit"
+      register: close_result
+
+    - name: "OUTPUT: Node closed"
+      ansible.builtin.debug:
+        msg: "{{ close_result.stdout }}"
+
+    - name: "ACTION: Verify cpu-n01 is CLOSED"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; get status"
+      register: verify_closed
+      changed_when: false
+
+    - name: "OUTPUT: Confirmed CLOSED"
+      ansible.builtin.debug:
+        msg: "cpu-n01 is now: {{ verify_closed.stdout | trim }}"
+
+    - name: "ACTION: See effect on device list"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; list"
+      register: list_closed
+      changed_when: false
+
+    - name: "OUTPUT: Device list shows CLOSED"
+      ansible.builtin.debug:
+        msg: "{{ list_closed.stdout_lines }}"
+
+    - name: "ACTION: Set cpu-n01 to DOWN (power off scenario)"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set status DOWN; commit"
+
+    - name: "ACTION: Verify DOWN"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; get status"
+      register: verify_down
+      changed_when: false
+
+    - name: "OUTPUT: Confirmed DOWN"
+      ansible.builtin.debug:
+        msg: "cpu-n01 is now: {{ verify_down.stdout | trim }}"
+
+    - name: "ACTION: Bring cpu-n01 back UP"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set status UP; commit"
+
+    - name: "ACTION: Final state check"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; list"
+      register: final_list
+      changed_when: false
+
+    - name: "OUTPUT: All nodes back to UP"
+      ansible.builtin.debug:
+        msg: "{{ final_list.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 03 Complete ═══
+          ✅ Walked through full lifecycle: UP → CLOSED → DOWN → UP
+          ✅ Verified state changes persist and show in device list
+          
+          KEY TAKEAWAY: Status changes are how you manage node availability.
+          CLOSED = maintenance, DOWN = powered off, INSTALL = re-imaging.
+          Always CLOSE before powering down or re-provisioning.
+          
+          NEXT: Lab 04 — Software Images

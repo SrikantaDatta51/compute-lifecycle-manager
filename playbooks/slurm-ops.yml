@@ -1,0 +1,51 @@
+---
+- name: Slurm Operations
+  hosts: headnode
+  gather_facts: no
+  tasks:
+    - name: Get Slurm version
+      command: sinfo --version
+      register: slurm_ver
+
+    - name: Show all partitions
+      command: sinfo -l
+      register: sinfo_long
+
+    - name: Show node details
+      command: scontrol show nodes
+      register: nodes
+
+    - name: Show partition config
+      command: scontrol show partitions
+      register: partitions
+
+    - name: Show job queue
+      command: squeue
+      register: queue
+
+    - name: Show cluster accounting
+      command: sacctmgr show cluster
+      register: acct
+
+    - name: Resume all nodes
+      command: scontrol update nodename=node[001-003] state=resume
+      register: resume_out
+      ignore_errors: yes
+
+    - name: Verify node state after resume
+      command: sinfo
+      register: final_state
+
+    - name: Display Slurm Report
+      debug:
+        msg: |
+          === SLURM {{ slurm_ver.stdout }} ===
+          
+          === Partition Status ===
+          {{ sinfo_long.stdout }}
+          
+          === Job Queue ===
+          {{ queue.stdout }}
+          
+          === Final State ===
+          {{ final_state.stdout }}

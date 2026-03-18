@@ -1,0 +1,24 @@
+---
+# BCM DNS Configuration Role
+# Sets global nameservers and domain via cmsh
+
+- name: Set global nameservers
+  shell: >
+    cmsh -c "base; set nameservers {{ dns_nameservers | join(' ') }}; commit"
+  register: result
+  changed_when: "'Successfully committed' in result.stdout"
+
+- name: Set network domain
+  shell: >
+    cmsh -c "network; use {{ bcm_internal_network }}; set domainname {{ bcm_domain }}; commit"
+  when: bcm_domain is defined
+
+- name: Set DNS per category
+  shell: >
+    cmsh -c "category; use {{ item.name }}; roles; use resolvconf;
+    set nameservers {{ dns_nameservers | join(' ') }};
+    set searchdomains {{ dns_search_domains | join(' ') }}; commit"
+  loop: "{{ bcm_categories }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: bcm_categories | length > 0

@@ -1,0 +1,91 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 09 — Health Monitoring & Diagnostics
+# ═══════════════════════════════════════════════════════════════════
+- name: "BCM Lab 09 — Health Monitoring"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: BCM Health Monitoring"
+      ansible.builtin.debug:
+        msg: |
+          ── Health Monitoring ──
+          BCM continuously monitors all nodes.
+          You can check health via:
+            1. device status (UP/CLOSED/DOWN)
+            2. Remote exec (nvidia-smi, ibstat, dmesg)
+            3. NVSM (NVIDIA System Management) for DGX nodes
+          
+          A healthy node = UP status + all services active + no XID errors.
+
+    - name: "ACTION: Quick health sweep of all nodes"
+      ansible.builtin.shell: |
+        NODE="{{ item }}"
+        echo "── Health: $NODE ──"
+        STATUS=$({{ cmsh_bin }} -c "device; use $NODE; get status" | tail -1)
+        echo "  BCM Status:    $STATUS"
+        POWER=$({{ cmsh_bin }} -c "device; use $NODE; power status" | tail -1)
+        echo "  Power:         $POWER"
+        SVC=$({{ cmsh_bin }} -c "device; use $NODE; exec 'systemctl is-active nvidia-fabricmanager'" | tail -1)
+        echo "  FabricManager: $SVC"
+        echo "  Result:        $([ "$STATUS" = "UP" ] && echo '✅ HEALTHY' || echo '⚠️ NEEDS ATTENTION')"
+      loop: "{{ all_nodes }}"
+      register: health
+      changed_when: false
+
+    - name: "OUTPUT: Health report"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ health.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "ACTION: Check for XID errors (GPU errors) on gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'dmesg 2>/dev/null | grep -ci xid'"
+      register: xid
+      changed_when: false
+
+    - name: "OUTPUT: XID error count"
+      ansible.builtin.debug:
+        msg: "gpu-n01 XID errors: {{ xid.stdout_lines[-1] | default('0') }}"
+
+    - name: "CONCEPT: NVSM for DGX nodes"
+      ansible.builtin.debug:
+        msg: |
+          ── NVSM (NVIDIA System Management) ──
+          DGX nodes have NVSM which provides deeper health info:
+            nvsm show health  — Quick health summary
+            nvsm dump         — Full diagnostic dump (BMC, BIOS, GPU, PSU, fans)
+          
+          NVSM data is essential for NVIDIA support tickets.
+
+    - name: "ACTION: NVSM health check on gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvsm show health'"
+      register: nvsm_health
+      changed_when: false
+
+    - name: "OUTPUT: NVSM health"
+      ansible.builtin.debug:
+        msg: "{{ nvsm_health.stdout_lines }}"
+
+    - name: "ACTION: NVSM dump on gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvsm dump'"
+      register: nvsm_dump
+      changed_when: false
+
+    - name: "OUTPUT: NVSM dump"
+      ansible.builtin.debug:
+        msg: "{{ nvsm_dump.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 09 Complete ═══
+          ✅ Health sweep: status + power + services for all nodes
+          ✅ XID error check on GPU node
+          ✅ NVSM health check and full dump
+          
+          NEXT: Lab 10 — Configuration Overlays

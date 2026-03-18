@@ -1,0 +1,137 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Fleet Validation — Daily Quick Suite
+# ═══════════════════════════════════════════════════════════════════
+# Lightweight daily health pulse. Runs on every non-protected node.
+# ~20 minutes per node.
+
+name: daily-quick
+description: "Lightweight daily validation — fast health pulse"
+estimated_duration_minutes: 20
+sku_profiles: [h200, b200]
+schedule: "daily"
+stop_on_first_failure: false
+
+tests:
+  - name: dcgmi_quick
+    description: "DCGMI Level 1 — basic GPU health check"
+    command: "dcgmi diag -r 1"
+    timeout_seconds: 300
+    pass_criteria:
+      type: grep_absent
+      pattern: "FAIL"
+    failure_class: hardware
+    metrics:
+      - name: dcgmi_quick_passed
+        type: gauge
+        extract: "exit_code"
+
+  - name: gpu_ecc_check
+    description: "Check for uncorrectable ECC errors"
+    command: "nvidia-smi -q -d ECC | grep -A2 'Volatile' | grep 'Uncorrectable'"
+    timeout_seconds: 60
+    pass_criteria:
+      type: field_equals
+      field_pattern: "Uncorrectable.*:\\s+(\\d+)"
+      expected: "0"
+    failure_class: hardware
+    metrics:
+      - name: gpu_ecc_uncorrectable
+        type: gauge
+        extract: "field_pattern"
+
+  - name: gpu_temp_check
+    description: "Check GPU temperatures are within safe range"
+    command: "nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits"
+    timeout_seconds: 60
+    pass_criteria:
+      type: all_values_below
+      threshold: 85
+    failure_class: software
+    metrics:
+      - name: gpu_temperature_celsius
+        type: gauge
+        extract: "max_value"
+
+  - name: nvlink_status
+    description: "Verify all NVLink connections are active"
+    command: "nvidia-smi nvlink --status -i 0"
+    timeout_seconds: 120
+    pass_criteria:
+      type: grep_absent
+      pattern: "inactive"
+    failure_class: hardware
+    metrics:
+      - name: nvlink_active
+        type: gauge
+        extract: "exit_code"
+
+  - name: pcie_bandwidth_check
+    description: "Verify PCIe link width and speed"
+    command: "nvidia-smi -q -d PERFORMANCE | grep -E 'Link Width|Link Gen'"
+    timeout_seconds: 60
+    pass_criteria:
+      type: grep_present
+      pattern: "x16"
+    failure_class: hardware
+    metrics:
+      - name: pcie_link_ok
+        type: gauge
+        extract: "exit_code"
+
+  - name: fabricmanager_health
+    description: "Check NVIDIA Fabric Manager service"
+    command: "systemctl is-active nvidia-fabricmanager"
+    timeout_seconds: 30
+    pass_criteria:
+      type: output_equals
+      expected: "active"
+    failure_class: software
+    metrics:
+      - name: fabricmanager_active
+        type: gauge
+        extract: "exit_code"
+
+  - name: dcgm_service_health
+    description: "Check NVIDIA DCGM service"
+    command: "systemctl is-active nvidia-dcgm"
+    timeout_seconds: 30
+    pass_criteria:
+      type: output_equals
+      expected: "active"
+    failure_class: software
+    metrics:
+      - name: dcgm_active
+        type: gauge
+        extract: "exit_code"
+
+  - name: ib_port_check
+    description: "Check InfiniBand ports are Active"
+    command: "ibstat | grep -c 'State: Active'"
+    timeout_seconds: 60
+    pass_criteria:
+      type: value_gte
+      threshold: 1
+    failure_class: hardware
+    metrics:
+      - name: ib_active_ports
+        type: gauge
+        extract: "output_value"
+
+  - name: nccl_allreduce_quick
+    description: "Quick NCCL AllReduce — small message sizes only"
+    command: >-
+      docker run --rm --gpus all --ipc=host --ulimit memlock=-1
+      ${NCCL_CONTAINER_IMAGE}
+      ${NCCL_TESTS_PATH}/all_reduce_perf -b 8 -e 256M -f 2
+      -g ${GPU_COUNT} -w 3 -n 20
+    timeout_seconds: 600
+    pass_criteria:
+      type: bandwidth_gte
+      field: "busbw"
+      threshold_key: "nccl_allreduce_min_busbw_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nccl_allreduce_busbw_gbps
+        type: gauge
+        extract: "busbw"

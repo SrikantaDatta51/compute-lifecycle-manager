@@ -1,0 +1,135 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab — Test Inventory (uses stateful simulators)
+# ═══════════════════════════════════════════════════════════════════
+# Simulators are in lab/simulators/ — they persist state in
+# /tmp/bcm-lab-state/*.json so every command has real effect.
+#
+# To reset state:  rm -rf /tmp/bcm-lab-state
+# ═══════════════════════════════════════════════════════════════════
+all:
+  children:
+    bcm_headnodes:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+    cpu_nodes:
+      hosts:
+        cpu-n01: {}
+        cpu-n02: {}
+      vars:
+        node_category: "cpu"
+
+    gpu_nodes:
+      hosts:
+        gpu-n01: {}
+      vars:
+        node_category: "gpu"
+        gpu_count: 1
+
+  vars:
+    # ── Simulator paths (absolute) ──
+    _repo_root: "{{ inventory_dir | dirname | dirname }}"
+    cmsh_bin: "{{ _repo_root }}/lab/simulators/cmsh"
+    ipmitool_bin: "echo"
+
+    # ── BCM paths ──
+    cm_shared_path: /tmp/bcm-lab-state/cm_shared
+    debug_bundle_dir: /tmp/bcm-lab-state/debug-bundles
+    bcm_version: "11.0"
+    cluster_name: "bcm-lab"
+    head_node: "localhost"
+
+    # ── Node lists ──
+    all_nodes:
+      - cpu-n01
+      - cpu-n02
+      - gpu-n01
+    cpu_nodes_list:
+      - cpu-n01
+      - cpu-n02
+    gpu_nodes_list:
+      - gpu-n01
+
+    # ── Slurm ──
+    slurm_default_partition: "cpu"
+    slurm_controller: "localhost"
+    slurm_partitions:
+      - { name: cpu, nodes: "cpu-n[01-02]", default: "yes", max_time: "24:00:00" }
+      - { name: gpu, nodes: "gpu-n01", default: "no", max_time: "48:00:00", gres: "gpu:1" }
+
+    # ── Fleet ──
+    fleet_name: "BCM Lab Cluster"
+    fleet_size: 3
+    buffer_nodes: 0
+    gpu_model: "virtual-gpu"
+    gpu_count_per_node: 1
+
+    # ── Debug Commands ──
+    debug_commands:
+      system:
+        - { name: "uptime",      cmd: "uptime" }
+        - { name: "free-h",      cmd: "free -h" }
+        - { name: "df-h",        cmd: "df -h" }
+        - { name: "dmesg-tail",  cmd: "dmesg | tail -10 2>/dev/null || echo 'no dmesg'" }
+      services:
+        - { name: "systemctl-failed", cmd: "systemctl --failed 2>/dev/null || echo 'no systemd'" }
+      bcm:
+        - { name: "cmsh-device-list", cmd: "echo 'device list via cmsh'" }
+      gpu:
+        - { name: "nvidia-smi",  cmd: "nvidia-smi -q 2>/dev/null || echo 'nvidia-smi stub'" }
+      ib:
+        - { name: "ibstat",      cmd: "ibstat 2>/dev/null || echo 'ibstat stub'" }
+      nvsm:
+        - { name: "nvsm-dump",   cmd: "nvsm dump 2>/dev/null || echo 'nvsm stub'" }
+      firmware:
+        - { name: "fw-version",  cmd: "echo 'Firmware: 01.02.03'" }
+
+    gpu_services:
+      - nvidia-fabricmanager
+      - nvidia-dcgm
+
+    drain_reasons:
+      fault: "fault-detected"
+      maintenance: "planned-maint"
+      rma: "rma-active"
+      sanity: "sanity-pending"
+
+    # Burn-in stubs
+    dcgmi_levels:
+      quick: { level: 1, description: "Quick health check", timeout: 60 }
+      medium: { level: 3, description: "Extended diagnostics", timeout: 120 }
+      full: { level: 4, description: "Full validation", timeout: 300 }
+    nccl_tests:
+      container_image: "nvcr.io/nvidia/pytorch:24.04-py3"
+      nccl_tests_path: "/opt/nccl_tests/build"
+      message_sizes: "8 4G"
+      warmup_iters: 5
+      iters: 100
+      tests:
+        - { name: "all_reduce_perf", binary: "all_reduce_perf_mpi", description: "AllReduce", expected_busbw_gbps: 380 }
+    hpl_config:
+      container_image: "nvcr.io/nvidia/hpc-benchmarks:24.03"
+      binary: "/workspace/hpl.sh"
+      problem_size: 200000
+      block_size: 1024
+      process_grid_p: 2
+      process_grid_q: 4
+      timeout: 60
+      expected_tflops: 60
+    nvbandwidth_config:
+      tests: ["host_to_device_memcpy_ce", "device_to_host_memcpy_ce"]
+    nemo_config:
+      container_image: "nvcr.io/nvidia/nemo:24.03.01"
+      nemotron_model: "nvidia/nemotron-3-8b-base-4k"
+      benchmark_scripts_path: "/opt/NeMo/examples"
+      inference_config: { model_size: "8b", batch_sizes: [1], sequence_lengths: [512], precision: "bf16", timeout: 60 }
+      training_config: { model_size: "8b", micro_batch_size: 2, global_batch_size: 16, max_steps: 5, precision: "bf16", tensor_parallel: 8, timeout: 60 }
+    burnin_default_tests: ["dcgmi_r3", "nccl_all_reduce", "nvbandwidth"]
+    s3_bucket: "nvidia-debug-bundles"
+    s3_region: "us-west-2"
+    s3_presign_expiry: 86400
+    node_spec: "cpu-n[01-02],gpu-n01"
+    cmsh_timeout: 10

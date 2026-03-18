@@ -1,9 +1,34 @@
-*.retry
-*.pyc
+# Python
 __pycache__/
-.vault_pass
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Go
+tenant-node-assignment-operator/bin/manager
+
+# IDE
+.idea/
+.vscode/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Runtime data
+*.db
+nlm-data/
 *.log
+
+# Large binaries (committed intentionally)
+# *.docx
+# *.pptx
+# *.tar.gz

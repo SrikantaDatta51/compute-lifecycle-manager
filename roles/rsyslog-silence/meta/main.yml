@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: rsyslog-silence
+  author: BCM Infrastructure Team
+  description: >
+    Deploys RSyslog filters to silence noisy mlx5 ACCESS_REG(0x805) kernel
+    messages on DGX nodes. Workaround for known driver bug fixed in DGX OS 7.4.0.
+  license: proprietary
+  min_ansible_version: "2.12"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "22.04"
+        - "24.04"
+  galaxy_tags:
+    - rsyslog
+    - nvidia
+    - dgx
+    - mlx5
+    - logging
+
+dependencies: []

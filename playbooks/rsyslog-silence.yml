@@ -1,0 +1,82 @@
+---
+# ═══════════════════════════════════════════════════════════════════════
+# RSyslog MLX5 Log Silencing — Deploy to Compute Nodes
+# ═══════════════════════════════════════════════════════════════════════
+# Deploys RSyslog filter to silence noisy mlx5 ACCESS_REG(0x805) kernel
+# messages on target nodes. Runs from BCM head node via SSH.
+#
+# Usage:
+#   # Deploy to all compute nodes (local-lab)
+#   ansible-playbook -i inventories/local-lab/hosts.yml playbooks/rsyslog-silence.yml
+#
+#   # Deploy to production (with consent)
+#   ansible-playbook -i inventories/az2-bmaas-prod/hosts.yml playbooks/rsyslog-silence.yml
+#
+#   # Dry-run (check mode)
+#   ansible-playbook -i inventories/local-lab/hosts.yml playbooks/rsyslog-silence.yml --check --diff
+#
+#   # Deploy in route-to-file mode (audit trail)
+#   ansible-playbook -i inventories/local-lab/hosts.yml playbooks/rsyslog-silence.yml \
+#       -e "rsyslog_filter_mode=route"
+#
+#   # Rollback (remove filter, restore logging)
+#   ansible-playbook -i inventories/local-lab/hosts.yml playbooks/rsyslog-silence.yml \
+#       --tags rollback
+#
+#   # Deploy to specific hosts only
+#   ansible-playbook -i inventories/az2-bmaas-prod/hosts.yml playbooks/rsyslog-silence.yml \
+#       -e "target_hosts=gpu_nodes"
+#
+# Tags:
+#   deploy    — Full deployment (default)
+#   validate  — Validate RSyslog config only
+#   test      — Run suppression tests only
+#   rollback  — Remove filter and restore (must be explicitly tagged)
+#   logrotate — Logrotate config for route mode
+# ═══════════════════════════════════════════════════════════════════════
+
+- name: "RSyslog MLX5 Log Silencing — Pre-flight Check"
+  hosts: headnode
+  gather_facts: false
+  tags: [deploy, always]
+
+  tasks:
+    - name: Display deployment context
+      debug:
+        msg: |
+          ═══════════════════════════════════════════════════════
+           RSyslog MLX5 Log Silencing Deployment
+          ═══════════════════════════════════════════════════════
+           Environment: {{ env_name | default('local') }}
+           Filter Mode: {{ rsyslog_filter_mode | default('drop') }}
+           Target:      {{ target_hosts | default('compute') }}
+          ═══════════════════════════════════════════════════════
+           Issue:  mlx5 ACCESS_REG(0x805) err(-22) floods syslog
+           Fix:    DGX OS 7.4.0
+           Workaround: RSyslog filter (NVIDIA recommended)
+          ═══════════════════════════════════════════════════════
+
+- name: "RSyslog MLX5 Log Silencing — Deploy to Compute Nodes"
+  hosts: "{{ target_hosts | default('compute') }}"
+  become: yes
+  gather_facts: yes
+  tags: [deploy]
+
+  roles:
+    - role: rsyslog-silence
+
+- name: "RSyslog MLX5 Log Silencing — Summary"
+  hosts: "{{ target_hosts | default('compute') }}"
+  become: no
+  gather_facts: false
+  tags: [deploy]
+
+  tasks:
+    - name: Deployment summary
+      debug:
+        msg: |
+          ═══ Deployment Complete ═══
+          ✅ RSyslog filter deployed to {{ inventory_hostname }}
+          ✅ Config: {{ rsyslog_filter_dest | default('/etc/rsyslog.d/10-mlx5-filter.conf') }}
+          ✅ Mode: {{ rsyslog_filter_mode | default('drop') }}
+          ✅ RSyslog restarted and validated

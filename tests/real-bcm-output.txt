@@ -1,0 +1,313 @@
+=== CMSH HELP ===
+================================= Top ==================================
+alias ......................... Set aliases
+category ...................... Enter category mode
+cert .......................... Enter cert mode
+cloud ......................... Enter cloud mode
+color ......................... Manage console text color settings
+configurationoverlay .......... Enter configurationoverlay mode
+connect ....................... Connect to cluster
+delimiter ..................... Display/set delimiter
+device ........................ Enter device mode
+disconnect .................... Disconnect from cluster
+edgesite ...................... Enter edgesite mode
+etcd .......................... Enter etcd mode
+events ........................ Manage events
+exit .......................... Exit from current object or mode
+export ........................ Display list of aliases current list formats
+fspart ........................ Enter fspart mode
+group ......................... Enter group mode
+groupingsyntax ................ Manage the default grouping syntax
+help .......................... Display this help
+hierarchy ..................... Enter hierarchy mode
+history ....................... Display command history
+kubernetes .................... Enter kubernetes mode
+list .......................... List state for all modes
+main .......................... Enter main mode
+modified ...................... List modified objects
+monitoring .................... Enter monitoring mode
+network ....................... Enter network mode
+nodegroup ..................... Enter nodegroup mode
+partition ..................... Enter partition mode
+powercircuit .................. Enter powercircuit mode
+process ....................... Enter process mode
+profile ....................... Enter profile mode
+quit .......................... Quit shell
+quitconfirmation .............. Manage the status of quit confirmation
+rack .......................... Enter rack mode
+refresh ....................... Refresh all modes
+run ........................... Execute cmsh commands from specified file
+session ....................... Enter session mode
+softwareimage ................. Enter softwareimage mode
+task .......................... Enter task mode
+time .......................... Measure time of executing command
+unalias ....................... Unset aliases
+user .......................... Enter user mode
+watch ......................... Execute a command periodically, showing output
+wlm ........................... Enter wlm mode
+
+=== DEVICE USE node001 ===
+[  DOWN  ], unassigned
+
+=== DEVICE USE node001 SHOW ===
+Hostname                                node001                                                    
+IP                                      192.168.200.1                                              
+Network                                 internalnet                                                
+Revision                                                                                           
+Type                                    PhysicalNode                                               
+Mac                                     00:00:00:00:00:00                                          
+Use exclusively for                      (category:default)                                        
+Category                                default                                                    
+Activation                              Sun, 08 Mar 2026 09:11:05 CET                              
+Rack                                                                                               
+Chassis                                 < not set >                                                
+Access Settings                         <submode>                                                  
+Roles                                   <0 in submode>                                             
+Software image                          default-image (category:default)                           
+Node installer disk                     no                                                         
+Install boot record                     no                                                         
+Install mode                                                                                       
+Next install mode                                                                                  
+Time zone                               Europe/Amsterdam (partition:base)                          
+Management network                                                                                 
+Data node                               no                                                         
+Disk setup                              <766 bytes> (category:default)                             
+Hardware RAID configuration             <0B>                                                       
+Initialize script                       <0B>                                                       
+Finalize script                         <0B>                                                       
+BIOS setup                              < not set >                                                
+Allow networking restart                no                                                         
+PXE Label                                                                                          
+Block devices cleared on next boot                                                                 
+Provisioning interface                  BOOTIF                                                     
+Provisioning Transport                  RSYNCDAEMON                                                
+Exclude list manipulate script          <0B>                                                       
+Exclude list full install               <0B>                                                       
+Exclude list sync install               <0B>                                                       
+Exclude list update                     <0B>                                                       
+Exclude list grab                       <0B>                                                       
+Exclude list grab new                   <0B>                                                       
+Power control                           none                                                       
+Custom power script                                                                                
+Custom power script argument                                                                       
+Power distribution units                                                                           
+IO scheduler                                                                                       
+Kernel version                          6.8.0-51-generic (software image:default-image)            
+Kernel parameters                       rd.driver.blacklist=nouveau (software image:default-image) 
+Kernel output console                   tty0 (software image:default-image)                        
+Boot loader                             syslinux (default)                                         
+Boot loader protocol                    HTTP (default)                                             
+Boot loader file                                                                                   
+Kernel modules                          53 (software image:default-image)                          
+FIPS                                    no (default)                                               
+Template node                           no                                                         
+From template node                                                                                 
+Default gateway                         192.168.200.254 (headnode)                                 
+Default gateway metric                  0                                                          
+Switch ports                                                                                       
+Interfaces                              <1 in submode>                                             
+Static routes                           <0 in submode>                                             
+GPU Settings                            <0 in submode>                                             
+BMC Settings                            <submode>                                                  
+SELinux Settings                        <submode>                                                  
+Filesystem mounts                       <0 in submode>                                             
+Filesystem exports                      <0 in submode>                                             
+Services                                <0 in submode>                                             
+Userdefined1                                                                                       
+Userdefined2                                                                                       
+User defined resources                                                                             
+Supports GNSS                           no                                                         
+Custom ping script                                                                                 
+Custom ping script argument                                                                        
+Custom remote console script                                                                       
+Custom remote console script argument                                                              
+Partition                               base                                                       
+Version config files                    no                                                         
+Part number                                                                                        
+Serial number                                                                                      
+Authentication service                  category                                                   
+Notes                                   <0B>                                                       
+Prometheus metric forwarders            <0 in submode>                                             
+
+=== CATEGORY USE default ===
+Name                             default                                                    
+Nodes                            0                                                          
+Nodes                            3                                                          
+Revision                                                                                    
+Use exclusively for                                                                         
+User node login                  ALWAYS                                                     
+Data node                        no                                                         
+Allow networking restart         no                                                         
+Default gateway                  0.0.0.0                                                    
+Default gateway metric           0                                                          
+Name servers                                                                                
+Time servers                                                                                
+Search domain                                                                               
+Management network               internalnet                                                
+Version config files             no                                                         
+FIPS                             no                                                         
+IO scheduler                                                                                
+Authentication service           auto                                                       
+ZTP Settings                     <submode>                                                  
+Install mode                     AUTO                                                       
+New node install mode            FULL                                                       
+Node installer disk              no                                                         
+Install boot record              no                                                         
+Initialize script                <0B>                                                       
+Finalize script                  <0B>                                                       
+Exclude list full install        <234B>                                                     
+Exclude list sync install        <1.20KiB>                                                  
+Exclude list update              <4.1KiB>                                                   
+Exclude list grab                <1.78KiB>                                                  
+Exclude list grab new            <1.34KiB>                                                  
+Exclude list manipulate script   <0B>                                                       
+Disk setup                       <766B>                                                     
+Hardware RAID configuration      <0B>                                                       
+Software image                   default-image                                              
+Kernel version                   6.8.0-51-generic (software image:default-image)            
+Kernel parameters                rd.driver.blacklist=nouveau (software image:default-image) 
+Kernel output console            tty0 (software image:default-image)                        
+Kernel modules                   53 (software image:default-image)                          
+Boot loader                      syslinux                                                   
+Boot loader protocol             HTTP                                                       
+Boot loader file                                                                            
+Filesystem mounts                <6 in submode>                                             
+Static routes                    <0 in submode>                                             
+Roles                            <0 in submode>                                             
+GPU Settings                     <0 in submode>                                             
+Filesystem exports               <0 in submode>                                             
+Services                         <0 in submode>                                             
+BMC Settings                     <submode>                                                  
+SELinux Settings                 <submode>                                                  
+DPU Settings                     <submode>                                                  
+Access Settings                  <submode>                                                  
+Time zone                        Europe/Amsterdam (base)                                    
+BIOS setup                       < not set >                                                
+Notes                            <0B>                                                       
+
+=== SOFTWAREIMAGE SHOW ===
+Name                             default-image                                   
+Nodes                            3                                               
+Revision                                                                         
+Path                             /cm/images/default-image                        
+Creation time                    Sun, 08 Mar 2026 09:11:05 CET                   
+Kernel version                   6.8.0-51-generic                                
+Kernel parameters                rd.driver.blacklist=nouveau                     
+Kernel output console            tty0                                            
+Kernel modules                   <53 in submode>                                 
+Enable SOL                       no                                              
+SOL Port                         ttyS1                                           
+SOL Speed                        115200                                          
+SOL Flow Control                 yes                                             
+FSPart                           /cm/images/default-image                        
+Boot FSPart                      /cm/images/default-image/boot                   
+Notes                            <0B>                                            
+
+=== NETWORK LIST ===
+externalnet        External       16             0.0.0.0          nvidia.com           no  
+globalnet          Global         0              0.0.0.0          cm.cluster               
+internalnet        Internal       24             192.168.200.0    cluster.local            
+
+=== MONITORING DATA ===
+
+=== BCM WEB UI PORT ===
+LISTEN 0      128                                   *:8081             *:*    users:(("cmd",pid=2846,fd=8))                                                                                                                                      
+LISTEN 0      128                                   *:8080             *:*    users:(("cmd",pid=2846,fd=9))                                                                                                                                      
+
+=== CMSH MAIN MODULES ===
+================================= Top ==================================
+alias ......................... Set aliases
+category ...................... Enter category mode
+cert .......................... Enter cert mode
+cloud ......................... Enter cloud mode
+color ......................... Manage console text color settings
+configurationoverlay .......... Enter configurationoverlay mode
+connect ....................... Connect to cluster
+delimiter ..................... Display/set delimiter
+device ........................ Enter device mode
+disconnect .................... Disconnect from cluster
+edgesite ...................... Enter edgesite mode
+etcd .......................... Enter etcd mode
+events ........................ Manage events
+exit .......................... Exit from current object or mode
+export ........................ Display list of aliases current list formats
+fspart ........................ Enter fspart mode
+group ......................... Enter group mode
+groupingsyntax ................ Manage the default grouping syntax
+help .......................... Display this help
+hierarchy ..................... Enter hierarchy mode
+history ....................... Display command history
+kubernetes .................... Enter kubernetes mode
+list .......................... List state for all modes
+main .......................... Enter main mode
+modified ...................... List modified objects
+monitoring .................... Enter monitoring mode
+network ....................... Enter network mode
+nodegroup ..................... Enter nodegroup mode
+partition ..................... Enter partition mode
+
+=== SQUEUE ===
+             JOBID PARTITION     NAME     USER ST       TIME  NODES NODELIST(REASON)
+
+=== SACCTMGR SHOW CLUSTERS ===
+   Cluster     ControlHost  ControlPort   RPC     Share GrpJobs       GrpTRES GrpSubmit MaxJobs       MaxTRES MaxSubmit     MaxWall                  QOS   Def QOS 
+---------- --------------- ------------ ----- --------- ------- ------------- --------- ------- ------------- --------- ----------- -------------------- --------- 
+     slurm 192.168.200.254         6817 11008         1                                                                                           normal           
+
+=== OVERLAY DETAILS ===
+Name                             slurm-client                                    
+Revision                                                                         
+All head nodes                   no                                              
+Priority                         500                                             
+Nodes                                                                            
+Categories                       default                                         
+Roles                            slurmclient                                     
+Customizations                   <0 in submode>                                  
+
+=== PARTITION SHOW ===
+Cluster name                     BCM 11.0 Cluster                                
+Revision                                                                         
+Cluster reference architecture                                                   
+Administrator email                                                              
+Name                             base                                            
+Headnode                         bcm11-headnode                                  
+Node basename                    node                                            
+Node digits                      3                                               
+Name servers                                                                     
+Name servers from dhcp                                                           
+Time servers                     0.pool.ntp.org,1.pool.ntp.org,2.pool.ntp.org    
+Search domains                                                                   
+Relay Host                                                                       
+Externally visible IP            0.0.0.0                                         
+Time zone                        Europe/Amsterdam                                
+BMC Settings                     <submode>                                       
+SNMP Settings                    <submode>                                       
+DPU Settings                     <submode>                                       
+SELinux Settings                 <submode>                                       
+Access Settings                  <submode>                                       
+Provisioning Settings            <submode>                                       
+ZTP settings                     <submode>                                       
+ZTP new switch settings          <submode>                                       
+NetQ settings                    <submode>                                       
+UFM settings                     <submode>                                       
+NMX Manager settings             <submode>                                       
+Default burn configuration       default-destructive                             
+Available burn configs           <3 in submode>                                  
+External network                 externalnet                                     
+Management network               internalnet                                     
+No zero conf                     no                                              
+Default category                 default                                         
+ArchOS                           <0 in submode>                                  
+Sign installer certificates      AUTO                                            
+Failover                         not defined                                     
+Failover groups                  <0 in submode>                                  
+Notes                            <0B>                                            
+Wlm job power usage settings     <submode>                                       
+Leak action policies             <5 in submode>                                  
+Active leak action policy        Default rack policy                             
+BMS                              NVIDIA-conforming BMS                           
+Prometheus metric forwarders     <0 in submode>                                  
+
+=== DEVICE TYPES ===
+
+=== CAPTURE2 COMPLETE ===

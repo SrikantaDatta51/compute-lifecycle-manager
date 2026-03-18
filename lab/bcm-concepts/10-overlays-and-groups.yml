@@ -1,0 +1,76 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 10 — Configuration Overlays
+# ═══════════════════════════════════════════════════════════════════
+- name: "BCM Lab 10 — Configuration Overlays"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: Configuration Overlays"
+      ansible.builtin.debug:
+        msg: |
+          ── Configuration Overlays ──
+          Overlays are layers of configuration that stack on top of each other.
+          
+          Think of it like CSS classes:
+            base-overlay:   SSH, NTP, syslog (applied to ALL nodes)
+            gpu-overlay:    NVIDIA driver, FabricManager, DCGM (GPU nodes only)
+            monitoring:     Prometheus node exporter (optional)
+          
+          Multiple overlays can apply to the same node.
+          Order matters — later overlays override earlier ones.
+
+    - name: "ACTION: List configuration overlays"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'configurationoverlay; list'"
+      register: overlays
+      changed_when: false
+
+    - name: "OUTPUT: Current overlays"
+      ansible.builtin.debug:
+        msg: "{{ overlays.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 10 Complete ═══
+          ✅ Listed configuration overlays
+          ✅ Understood overlay stacking model
+          
+          NEXT: Lab 11 — Node Groups
+
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 11 — Node Groups
+# ═══════════════════════════════════════════════════════════════════
+- name: "BCM Lab 11 — Node Groups"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: Node Groups"
+      ansible.builtin.debug:
+        msg: |
+          ── Node Groups ──
+          Node Groups are ad-hoc collections of nodes for batch operations.
+          Unlike categories (which define config), groups just group nodes together.
+          
+          Use cases:
+            - "maintenance-group": nodes currently being serviced
+            - "gpu-only": quick reference for all GPU nodes
+            - "rack-12": all nodes in physical rack 12
+
+    - name: "ACTION: List node groups"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'nodegroup; list'"
+      register: nodegroup_list
+      changed_when: false
+
+    - name: "OUTPUT: Node groups"
+      ansible.builtin.debug:
+        msg: "{{ nodegroup_list.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 11 Complete ═══
+          ✅ Listed node groups
+          ✅ Understood groups vs categories
+          
+          NEXT: Lab 12 — Debug Bundle Collection

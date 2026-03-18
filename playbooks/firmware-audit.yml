@@ -1,0 +1,178 @@
+---
+# ─── BCM Firmware Audit ──────────────────────────────────────────────
+# Collects firmware versions from all managed nodes for compliance.
+# Based on DGX B200 SOP-210 firmware standards.
+#
+# Usage:
+#   make firmware-audit ENV=local-lab
+#   ansible-playbook -i inventories/local-lab/hosts.yml playbooks/firmware-audit.yml
+#
+# Tags: bios, bmc, gpu, nic, all
+# ──────────────────────────────────────────────────────────────────────
+
+- name: BCM Firmware Audit
+  hosts: headnode
+  gather_facts: false
+  tags: [firmware]
+
+  vars:
+    audit_output_dir: "/tmp/firmware-audit-{{ env_name }}"
+    audit_timestamp: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
+
+  tasks:
+    - name: Display environment
+      debug:
+        msg: "Firmware audit for {{ env_name }} ({{ env_description }})"
+
+    - name: Create audit output directory
+      file:
+        path: "{{ audit_output_dir }}"
+        state: directory
+        mode: '0755'
+
+    # ─── BIOS Firmware ────────────────────────────────────────────────
+    - name: Audit BIOS versions via IPMI
+      shell: |
+        echo "=== BIOS Firmware Audit ==="
+        echo "Timestamp: $(date)"
+        echo ""
+        {% for cat in bcm_categories %}
+        {% if cat.nodes is defined %}
+        {% for node in cat.nodes %}
+        echo -n "{{ node }}: "
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@{{ node }} \
+          "dmidecode -t bios 2>/dev/null | grep -E 'Version|Release Date' | head -2" 2>/dev/null \
+          || echo "UNREACHABLE"
+        {% endfor %}
+        {% endif %}
+        {% endfor %}
+      register: bios_audit
+      tags: [bios]
+
+    - name: Display BIOS audit
+      debug:
+        msg: "{{ bios_audit.stdout }}"
+      tags: [bios]
+
+    # ─── BMC/IPMI Firmware ────────────────────────────────────────────
+    - name: Audit BMC firmware versions
+      shell: |
+        echo "=== BMC Firmware Audit ==="
+        {% for cat in bcm_categories %}
+        {% if cat.nodes is defined %}
+        {% for node in cat.nodes %}
+        echo -n "{{ node }}: "
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@{{ node }} \
+          "ipmitool mc info 2>/dev/null | grep -E 'Firmware Revision|Product ID' || echo 'N/A'" 2>/dev/null \
+          || echo "UNREACHABLE"
+        {% endfor %}
+        {% endif %}
+        {% endfor %}
+      register: bmc_audit
+      tags: [bmc]
+
+    - name: Display BMC audit
+      debug:
+        msg: "{{ bmc_audit.stdout }}"
+      tags: [bmc]
+
+    # ─── GPU Firmware / Driver ────────────────────────────────────────
+    - name: Audit GPU driver and firmware versions
+      shell: |
+        echo "=== GPU Driver & Firmware Audit ==="
+        {% for cat in bcm_categories %}
+        {% if cat.nodes is defined %}
+        {% for node in cat.nodes %}
+        echo "--- {{ node }} ---"
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@{{ node }} '
+          echo "Driver: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+          echo "CUDA:   $(nvidia-smi --query-gpu=cuda_version --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+          echo "VBIOS:  $(nvidia-smi --query-gpu=vbios_version --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+          echo "GPUs:   $(nvidia-smi --query-gpu=count --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+          echo "InfoROM: $(nvidia-smi --query-gpu=inforom.img --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+        ' 2>/dev/null || echo "UNREACHABLE"
+        {% endfor %}
+        {% endif %}
+        {% endfor %}
+      register: gpu_audit
+      tags: [gpu]
+
+    - name: Display GPU audit
+      debug:
+        msg: "{{ gpu_audit.stdout }}"
+      tags: [gpu]
+
+    # ─── NIC Firmware ─────────────────────────────────────────────────
+    - name: Audit NIC firmware versions (Mellanox/ConnectX)
+      shell: |
+        echo "=== NIC Firmware Audit ==="
+        {% for cat in bcm_categories %}
+        {% if cat.nodes is defined %}
+        {% for node in cat.nodes %}
+        echo "--- {{ node }} ---"
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 root@{{ node }} '
+          if command -v mlxfwmanager &>/dev/null; then
+            mlxfwmanager --query 2>/dev/null | grep -E "FW|PSID|Device" | head -10
+          elif command -v ethtool &>/dev/null; then
+            for iface in $(ls /sys/class/net/ | grep -v lo); do
+              fw=$(ethtool -i $iface 2>/dev/null | grep "firmware-version" | awk "{print \$2}")
+              [ -n "$fw" ] && echo "$iface: $fw"
+            done
+          else
+            echo "No NIC firmware tools found"
+          fi
+        ' 2>/dev/null || echo "UNREACHABLE"
+        {% endfor %}
+        {% endif %}
+        {% endfor %}
+      register: nic_audit
+      tags: [nic]
+
+    - name: Display NIC audit
+      debug:
+        msg: "{{ nic_audit.stdout }}"
+      tags: [nic]
+
+    # ─── BCM Software Version ────────────────────────────────────────
+    - name: Audit BCM and Slurm versions
+      shell: |
+        echo "=== BCM & Slurm Versions ==="
+        echo "BCM:   $(cmsh -c 'main; get version' 2>/dev/null || echo N/A)"
+        echo "Slurm: $(sinfo --version 2>/dev/null || echo N/A)"
+        echo "Head kernel: $(uname -r)"
+      register: bcm_version_audit
+      tags: [bcm]
+
+    - name: Display BCM versions
+      debug:
+        msg: "{{ bcm_version_audit.stdout }}"
+      tags: [bcm]
+
+    # ─── Compliance Report ───────────────────────────────────────────
+    - name: Generate firmware compliance report
+      copy:
+        content: |
+          # Firmware Audit Report — {{ env_name }}
+          Generated: {{ audit_timestamp }}
+
+          ## BIOS
+          {{ bios_audit.stdout | default('N/A') }}
+
+          ## BMC
+          {{ bmc_audit.stdout | default('N/A') }}
+
+          ## GPU
+          {{ gpu_audit.stdout | default('N/A') }}
+
+          ## NIC
+          {{ nic_audit.stdout | default('N/A') }}
+
+          ## BCM/Slurm
+          {{ bcm_version_audit.stdout | default('N/A') }}
+        dest: "{{ audit_output_dir }}/firmware-audit-{{ audit_timestamp }}.md"
+      tags: [report]
+
+    - name: Report location
+      debug:
+        msg: "Audit saved to {{ audit_output_dir }}/firmware-audit-{{ audit_timestamp }}.md"
+      tags: [report]

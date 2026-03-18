@@ -1,0 +1,136 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Fleet Validator — Node State Machine
+# ═══════════════════════════════════════════════════════════════════
+# Defines all possible node states and valid transitions.
+# Each transition specifies the BCM command and alerting behavior.
+
+states:
+  healthy:
+    description: "Node is certified and ready for customer workloads"
+    bcm_status: "UP"
+    color: "#22c55e"   # green
+    can_run_tests: true
+    customer_workloads: true
+
+  testing:
+    description: "Node is currently undergoing certification tests"
+    bcm_status: "TESTING"
+    color: "#3b82f6"   # blue
+    can_run_tests: true
+    customer_workloads: false
+
+  maintenance:
+    description: "Node has a software-level issue requiring intervention"
+    bcm_status: "DRAINED"
+    color: "#f59e0b"   # amber
+    can_run_tests: false
+    customer_workloads: false
+
+  rma:
+    description: "Node has a hardware-level issue requiring RMA"
+    bcm_status: "DRAINED"
+    color: "#ef4444"   # red
+    can_run_tests: false
+    customer_workloads: false
+
+  customer_protected:
+    description: "Node is assigned to a customer — tests must NOT run"
+    bcm_status: "UP"
+    color: "#8b5cf6"   # purple
+    can_run_tests: false
+    customer_workloads: true
+
+  provisioning:
+    description: "Node is being provisioned or reimaged"
+    bcm_status: "INSTALLING"
+    color: "#6366f1"   # indigo
+    can_run_tests: false
+    customer_workloads: false
+
+# ── Valid Transitions ──
+transitions:
+  - from: healthy
+    to: testing
+    trigger: "certification_started"
+    bcm_command: "device; use {node}; set category testing; commit"
+    alert: false
+
+  - from: testing
+    to: healthy
+    trigger: "all_tests_passed"
+    bcm_command: "device; use {node}; set category default; commit"
+    alert: false
+    actions:
+      - "write_certification_record"
+      - "push_metrics"
+
+  - from: testing
+    to: maintenance
+    trigger: "software_failure_detected"
+    bcm_command: "device; use {node}; set status DRAINED; set drainstatus 'maintenance:software-issue'; commit"
+    alert: true
+    alert_severity: warning
+    alert_channel: "#fleet-ops"
+    actions:
+      - "collect_debug_bundle"
+      - "write_failure_record"
+      - "push_metrics"
+
+  - from: testing
+    to: rma
+    trigger: "hardware_failure_detected"
+    bcm_command: "device; use {node}; set status DRAINED; set drainstatus 'rma:hardware-failure'; commit"
+    alert: true
+    alert_severity: critical
+    alert_channel: "#fleet-ops"
+    actions:
+      - "collect_debug_bundle"
+      - "write_failure_record"
+      - "open_rma_ticket"
+      - "push_metrics"
+
+  - from: maintenance
+    to: testing
+    trigger: "maintenance_resolved"
+    bcm_command: "device; use {node}; set status UP; commit"
+    alert: false
+
+  - from: rma
+    to: testing
+    trigger: "rma_completed"
+    bcm_command: "device; use {node}; set status UP; commit"
+    alert: false
+
+  - from: provisioning
+    to: testing
+    trigger: "provisioning_complete"
+    bcm_command: "device; use {node}; set status UP; commit"
+    alert: false
+
+# ── Customer Protection Detection ──
+# How to determine if a node is customer-protected
+customer_protection:
+  # Method 1: BCM device property
+  bcm_check: "device; use {node}; get allocation"
+  # Method 2: Kubernetes node label (if K8s is present)
+  k8s_label: "node-role.kubernetes.io/customer=true"
+  # Method 3: Explicit exclusion list (file-based)
+  exclusion_file: "/etc/fleet-validator/protected-nodes.txt"
+
+# ── Certification Record ──
+certification:
+  record_dir: "/var/lib/fleet-validator/certifications"
+  record_format: "json"
+  retention_days: 90
+  fields:
+    - node_name
+    - timestamp_utc
+    - suite_name
+    - sku_profile
+    - tests_passed
+    - tests_failed
+    - tests_skipped
+    - total_duration_seconds
+    - certified  # true/false
+    - operator   # who triggered it

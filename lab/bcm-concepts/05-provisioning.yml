@@ -1,0 +1,101 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 05 — Node Provisioning
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - Provisioning = deploying an OS image to a node via PXE
+#   - Steps: set category → set image → set status INSTALL → power reset
+#   - Node PXE boots, downloads image from head node, installs
+#   - Node comes up in UP state after provisioning completes
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 05 — Node Provisioning"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: Provisioning workflow"
+      ansible.builtin.debug:
+        msg: |
+          ── Provisioning Flow ──
+          1. Set image profile (which OS image to deploy)
+          2. Set node status to INSTALL
+          3. Power reset the node → it PXE boots
+          4. Node downloads image from head node
+          5. Node comes up with fresh OS configured
+          
+          This is how you re-image a node or deploy to bare metal.
+
+    - name: "ACTION: Check current state before provisioning"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'device; use cpu-n01; show'"
+      register: pre_prov
+      changed_when: false
+
+    - name: "OUTPUT: cpu-n01 before provisioning"
+      ansible.builtin.debug:
+        msg: "{{ pre_prov.stdout_lines }}"
+
+    - name: "ACTION: Set image profile to 'default-image'"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set imageprofile default-image; commit"
+      register: set_image
+
+    - name: "OUTPUT: Image set"
+      ansible.builtin.debug:
+        msg: "{{ set_image.stdout }}"
+
+    - name: "ACTION: Set node to INSTALL mode"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set status INSTALL; commit"
+
+    - name: "ACTION: Verify INSTALL status"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'device; use cpu-n01; get status'"
+      register: install_check
+      changed_when: false
+
+    - name: "OUTPUT: Node in INSTALL mode"
+      ansible.builtin.debug:
+        msg: "cpu-n01 status: {{ install_check.stdout | trim }}"
+
+    - name: "ACTION: Power reset to trigger PXE boot"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; power reset"
+      register: pxe_boot
+
+    - name: "OUTPUT: PXE boot triggered"
+      ansible.builtin.debug:
+        msg: "{{ pxe_boot.stdout }}"
+
+    - name: "CONCEPT: In production, node PXE boots and re-images (takes ~5-15 min)"
+      ansible.builtin.debug:
+        msg: |
+          ── What happens during provisioning ──
+          1. Node BIOS set to PXE boot
+          2. Node gets DHCP from head node
+          3. Node downloads kernel + initrd via TFTP
+          4. Node mounts image via NFS or HTTP
+          5. Node configures itself (hostname, network, roles)
+          6. Node reports back to BCM → status changes to UP
+
+    - name: "ACTION: Simulate provisioning complete — set back to UP"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set status UP; commit"
+
+    - name: "ACTION: Final state"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'device; list'"
+      register: final
+      changed_when: false
+
+    - name: "OUTPUT: All nodes UP after provisioning"
+      ansible.builtin.debug:
+        msg: "{{ final.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 05 Complete ═══
+          ✅ Set image profile on node
+          ✅ Set status to INSTALL
+          ✅ Triggered PXE boot (power reset)
+          ✅ Simulated provisioning completion → UP
+          
+          NEXT: Lab 06 — Power Management

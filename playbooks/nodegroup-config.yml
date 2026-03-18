@@ -1,0 +1,88 @@
+---
+# ─── BCM Node Group (Category & Overlay) Management ──────────────────
+# Manages BCM node categories and configuration overlays via cmsh.
+# Uses bcm_categories from group_vars/all.yml per environment.
+#
+# Usage:
+#   make nodegroups ENV=az2-staging
+#   ansible-playbook -i inventories/az2-staging/hosts.yml playbooks/nodegroup-config.yml
+# ──────────────────────────────────────────────────────────────────────
+
+- name: Manage BCM Node Categories and Overlays
+  hosts: headnode
+  gather_facts: false
+  tags: [nodegroups]
+
+  tasks:
+    - name: Display environment
+      debug:
+        msg: "Managing node groups for {{ env_name }} ({{ env_description }})"
+
+    # ─── Category Management ──────────────────────────────────────────
+    - name: List current categories
+      shell: cmsh -c "category list"
+      register: cat_list
+      tags: [categories, audit]
+
+    - name: Display current categories
+      debug:
+        msg: "{{ cat_list.stdout }}"
+      tags: [categories, audit]
+
+    - name: Configure category image assignments
+      shell: |
+        cmsh -c "category; use {{ item.name }}; set softwareimage {{ item.image }}; commit"
+      loop: "{{ bcm_categories }}"
+      loop_control:
+        label: "{{ item.name }} → {{ item.image }}"
+      when: item.image is defined
+      tags: [categories, images]
+
+    - name: Configure category kernel parameters
+      shell: |
+        cmsh -c "category; use {{ item.name }}; set kernelparameters '{{ item.kernel_params }}'; commit"
+      loop: "{{ bcm_categories }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.kernel_params is defined
+      tags: [categories, kernel]
+
+    # ─── Overlay Management ───────────────────────────────────────────
+    - name: List current configuration overlays
+      shell: cmsh -c "configurationoverlay list"
+      register: overlay_list
+      tags: [overlays, audit]
+
+    - name: Display current overlays
+      debug:
+        msg: "{{ overlay_list.stdout }}"
+      tags: [overlays, audit]
+
+    # ─── Node Assignment ─────────────────────────────────────────────
+    - name: Assign nodes to categories
+      shell: |
+        {% for node in item.nodes %}
+        cmsh -c "device; use {{ node }}; set category {{ item.name }}; commit"
+        {% endfor %}
+      loop: "{{ bcm_categories }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.nodes | length }} nodes)"
+      when: item.nodes is defined and item.nodes | length > 0
+      tags: [assign]
+
+    # ─── Verification ────────────────────────────────────────────────
+    - name: Verify node-to-category mapping
+      shell: |
+        echo "=== Node → Category Mapping ==="
+        cmsh -c "device list" | grep -v "^$"
+        echo ""
+        echo "=== Category Details ==="
+        {% for cat in bcm_categories %}
+        echo "--- {{ cat.name }} ---"
+        cmsh -c "category; use {{ cat.name }}; get softwareimage; get kernelparameters"
+        {% endfor %}
+      register: verify
+
+    - name: Display verification
+      debug:
+        msg: "{{ verify.stdout }}"

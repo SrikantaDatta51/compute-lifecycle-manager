@@ -1,0 +1,88 @@
+# BCM Slurm Configuration via cmsh
+#
+# Run these commands inside the BCM head node's cmsh shell.
+# Access: virt-viewer bcm-head → login as root → type 'cmsh'
+#
+# Prerequisites:
+# - BCM head node fully installed and running
+# - Compute nodes (cpu-n01, cpu-n02, gpu-n01) registered in BCM
+#
+
+# ============================================================
+# Step 1: Enable Slurm Workload Manager
+# ============================================================
+
+# Enter configuration mode
+configurationoverlay
+use slurm
+
+# Add roles
+roles
+add slurmserver
+commit
+
+# Go back and set up the overlay
+..
+set roles slurmserver
+commit
+
+# ============================================================
+# Step 2: Create Slurm Partitions
+# ============================================================
+
+# In cmsh:
+category
+use default
+
+# Set Slurm role for compute nodes
+roles
+add slurmclient
+commit
+
+# ============================================================
+# Step 3: Configure GRES for GPU Node
+# ============================================================
+
+# In cmsh - configure GPU GRES for gpu-n01:
+device
+use gpu-n01
+
+# Add GRES (Generic Resource) for GPU
+set gres "gpu:quadro_gv100:1"
+commit
+
+# ============================================================
+# Step 4: Create Partitions
+# ============================================================
+
+# In cmsh:
+partition
+add cpu-partition
+set default yes
+set nodes cpu-n01,cpu-n02
+commit
+
+add gpu-partition
+set nodes gpu-n01
+set gres "gpu:1"
+commit
+
+# ============================================================
+# Step 5: Verify Slurm Status
+# ============================================================
+
+# From the head node shell (not cmsh):
+#   sinfo                    # Show partition/node status
+#   scontrol show partition  # Detailed partition info
+#   scontrol show node       # Detailed node info
+#   squeue                   # Show job queue
+
+# ============================================================
+# Step 6: Submit a Test Job
+# ============================================================
+
+# CPU test job:
+#   sbatch --partition=cpu-partition --wrap="hostname && sleep 30"
+#
+# GPU test job:
+#   sbatch --partition=gpu-partition --gres=gpu:1 --wrap="nvidia-smi"

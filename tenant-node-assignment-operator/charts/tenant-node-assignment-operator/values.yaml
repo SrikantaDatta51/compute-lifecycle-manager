@@ -1,0 +1,402 @@
+# Compute Platform Operator — Helm Values
+# ========================================
+# This file controls ALL operator behavior. The workflow steps below
+# define the complete reconciliation and cleanup logic. To support a
+# different operational scenario, replace the workflow steps — no code
+# changes, no rebuild required.
+#
+# ┌─────────────────────────────────────────────────────────────┐
+# │  Supported Scenarios (same binary, different YAML):        │
+# │                                                             │
+# │  1. Node Assignment  — Claim a node for a workload group   │
+# │  2. Node Swap        — Move node between owners via CRs    │
+# │  3. Node Decommission — Drain + record decommissioned node │
+# │  4. Node Health Gate  — Block until GPU/network checks pass│
+# │  5. Burn-In           — Orchestrate burn-in + certify node │
+# └─────────────────────────────────────────────────────────────┘
+
+image:
+  repository: compute-platform/compute-platform-operator
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# HA mode — 2 replicas with leader election.
+# Only one pod is active at a time; the standby takes over on failure.
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+
+metrics:
+  enabled: true
+  port: 8080
+
+healthProbe:
+  port: 8081
+
+leaderElection:
+  enabled: true
+
+# ============================================================
+# ACTIVE WORKFLOW — Node Assignment (default)
+# ============================================================
+# PURPOSE: An owner team wants to claim a specific Kubernetes node.
+#
+# What happens:
+#   1. Operator validates the CR has an owner name and node name
+#   2. Fetches the target node from the cluster
+#   3. Sets an ownership label on the node (signals to schedulers
+#      and other controllers that this node belongs to this owner)
+#   4. Waits for an on-node agent to confirm the node is properly
+#      configured (by setting an annotation)
+#   5. Records the node as "ready" in a shared ConfigMap so
+#      downstream systems (dashboards, schedulers) can see it
+#
+# To SWAP a node between owners: delete the old CR (cleanup removes
+# the old label), then create a new CR with the new owner.
+# Same workflow handles it — no config change needed.
+
+operatorConfig:
+  workflow:
+    name: node-assignment
+    description: >
+      Assigns a node to an owner by labeling it, waiting for on-node
+      agent confirmation, and recording readiness in a shared ConfigMap.
+    steps:
+      - name: validate-spec
+        type: validateSpec
+        description: >
+          Ensure the CR has both an owner reference and a node reference.
+          Fails immediately if either is missing.
+
+      - name: fetch-target-node
+        type: fetchNode
+        description: >
+          Retrieve the target Kubernetes node object. If the node doesn't
+          exist in the cluster, the CR transitions to Failed phase.
+
+      - name: apply-ownership-label
+        type: setLabel
+        description: >
+          Set or correct the ownership label on the node. This label is
+          the primary signal to schedulers, admission controllers, and
+          other platform components that this node is claimed.
+          Idempotent — if the label already has the correct value, no
+          API call is made.
+        onSuccess: LabelApplied
+        params:
+          labelKey: compute-platform.io/owner
+          labelValueTemplate: "{{ .TenantName }}"
+
+      - name: await-node-agent-completion
+        type: checkAnnotation
+        description: >
+          Poll the node's annotations for a completion signal from the
+          on-node agent. The agent is responsible for node-local setup
+          (storage mounts, network config, GPU drivers, etc.).
+          Requeues every 15 seconds until the annotation appears.
+        waitIfNotReady: true
+        onSuccess: AwaitingNodeAgent
+        params:
+          annotationKey: compute-platform.io/node-agent-ready
+          annotationValue: "true"
+
+      - name: update-readiness-configmap
+        type: updateConfigMap
+        description: >
+          Record this node as ready in the platform-wide readiness
+          ConfigMap. Downstream systems (capacity dashboards, automated
+          schedulers) watch this ConfigMap to know which nodes are
+          available for workload placement.
+        params:
+          configMapNamespace: compute-platform-system
+          configMapName: node-readiness
+          configMapKeyTemplate: "{{ .TenantName }}.{{ .NodeName }}"
+          configMapValueTemplate: "ready"
+
+    cleanupSteps:
+      - name: fetch-node-for-cleanup
+        type: fetchNode
+        description: Fetch the node to remove the ownership label.
+        continueOnFailure: true
+
+      - name: remove-ownership-label
+        type: removeLabel
+        description: >
+          Remove the ownership label from the node, releasing it back
+          to the unassigned pool.
+        continueOnFailure: true
+        params:
+          labelKey: compute-platform.io/owner
+
+      - name: remove-readiness-entry
+        type: removeConfigMapEntry
+        description: >
+          Remove this node's entry from the readiness ConfigMap so
+          downstream systems no longer consider it assigned.
+        continueOnFailure: true
+        params:
+          configMapNamespace: compute-platform-system
+          configMapName: node-readiness
+          configMapKeyTemplate: "{{ .TenantName }}.{{ .NodeName }}"
+
+  reconciliation:
+    requeueSeconds: 15
+
+# ============================================================
+# HOW TO: Node Swap (owner-a → owner-b on same node)
+# ============================================================
+# No workflow change needed. The default assignment workflow handles it:
+#
+#   Step 1: Delete the existing CR
+#     kubectl delete tna old-assignment
+#     → Cleanup workflow removes owner-a's label + ConfigMap entry
+#
+#   Step 2: Apply a new CR with the new owner
+#     kubectl apply -f new-assignment.yaml
+#     → Standard workflow applies owner-b's label, waits for agent,
+#       updates ConfigMap
+#
+# The operator manages the entire transition automatically.
+
+# ============================================================
+# ALTERNATIVE: Node Decommission Workflow
+# ============================================================
+# PURPOSE: Take a node out of service safely.
+#
+# What happens:
+#   1. Validates the CR
+#   2. Labels the node as "decommissioning" so schedulers stop
+#      placing new workloads on it
+#   3. Sets an annotation requesting the drain controller to
+#      evict all running pods
+#   4. Waits for the drain controller to signal completion
+#   5. Records the node as decommissioned in a tracking ConfigMap
+#      for inventory and audit purposes
+#
+# operatorConfig:
+#   workflow:
+#     name: node-decommission
+#     description: Safely decommission a node by draining and recording status
+#     steps:
+#       - name: validate
+#         type: validateSpec
+#         description: Ensure CR has valid owner and node references
+#
+#       - name: fetch-node
+#         type: fetchNode
+#         description: Retrieve the target node
+#
+#       - name: mark-decommissioning
+#         type: setLabel
+#         description: >
+#           Label the node as "decommissioning". This signals the
+#           scheduler to stop placing new workloads on this node.
+#         params:
+#           labelKey: compute-platform.io/lifecycle
+#           labelValueTemplate: "decommissioning"
+#
+#       - name: request-drain
+#         type: setAnnotation
+#         description: >
+#           Signal the drain controller to start evicting pods.
+#           The drain controller watches for this annotation.
+#         params:
+#           annotationKey: compute-platform.io/request-drain
+#           annotationValue: "true"
+#
+#       - name: wait-drain-complete
+#         type: checkAnnotation
+#         description: >
+#           Poll until the drain controller confirms all pods are
+#           evicted. Requeues every 15 seconds.
+#         waitIfNotReady: true
+#         params:
+#           annotationKey: compute-platform.io/drain-complete
+#           annotationValue: "true"
+#
+#       - name: record-decommission
+#         type: updateConfigMap
+#         description: >
+#           Record the node as decommissioned for inventory tracking
+#           and audit trail.
+#         params:
+#           configMapNamespace: compute-platform-system
+#           configMapName: decommissioned-nodes
+#           configMapKeyTemplate: "{{ .NodeName }}"
+#           configMapValueTemplate: "{{ .TenantName }}"
+#
+#     cleanupSteps:
+#       - name: fetch
+#         type: fetchNode
+#         continueOnFailure: true
+#       - name: remove-lifecycle-label
+#         type: removeLabel
+#         continueOnFailure: true
+#         params:
+#           labelKey: compute-platform.io/lifecycle
+
+# ============================================================
+# ALTERNATIVE: Node Health Gate Workflow
+# ============================================================
+# PURPOSE: Block a node from being assigned until infrastructure
+# health checks pass.
+#
+# What happens:
+#   1. Labels the node as "pending" health gate
+#   2. Waits for the GPU validation agent to confirm GPUs are healthy
+#   3. Waits for the network validation agent to confirm links are up
+#   4. Only after both checks pass, marks the node as "passed"
+#   5. Records the node in the healthy-nodes ConfigMap
+#
+# This prevents unhealthy nodes from entering the assignable pool.
+#
+# operatorConfig:
+#   workflow:
+#     name: node-health-gate
+#     description: Gate node assignment behind infrastructure health checks
+#     steps:
+#       - name: validate
+#         type: validateSpec
+#         description: Ensure CR has valid references
+#
+#       - name: fetch-node
+#         type: fetchNode
+#         description: Retrieve the target node
+#
+#       - name: set-gate-pending
+#         type: setLabel
+#         description: >
+#           Mark the node as "pending" health gate. This prevents
+#           any assignment workflow from claiming this node.
+#         params:
+#           labelKey: compute-platform.io/health-gate
+#           labelValueTemplate: "pending"
+#
+#       - name: wait-gpu-check
+#         type: checkAnnotation
+#         description: >
+#           Wait for the GPU validation agent to confirm all GPUs
+#           pass diagnostics (Xid errors, memory, PCIe bandwidth).
+#         waitIfNotReady: true
+#         params:
+#           annotationKey: compute-platform.io/gpu-check-passed
+#           annotationValue: "true"
+#
+#       - name: wait-network-check
+#         type: checkAnnotation
+#         description: >
+#           Wait for the network validation agent to confirm all
+#           InfiniBand/Ethernet links are healthy and at full speed.
+#         waitIfNotReady: true
+#         params:
+#           annotationKey: compute-platform.io/network-check-passed
+#           annotationValue: "true"
+#
+#       - name: mark-healthy
+#         type: setLabel
+#         description: >
+#           All checks passed — mark the node as cleared for assignment.
+#         params:
+#           labelKey: compute-platform.io/health-gate
+#           labelValueTemplate: "passed"
+#
+#       - name: record-healthy
+#         type: updateConfigMap
+#         description: Record node in healthy inventory
+#         params:
+#           configMapNamespace: compute-platform-system
+#           configMapName: healthy-nodes
+#           configMapKeyTemplate: "{{ .NodeName }}"
+#           configMapValueTemplate: "ready"
+
+# ============================================================
+# ALTERNATIVE: Burn-In Orchestration Workflow
+# ============================================================
+# PURPOSE: Orchestrate burn-in testing for newly provisioned hardware.
+#
+# What happens:
+#   1. Labels the node with phase "burn-in" to isolate it from
+#      production scheduling
+#   2. Sets an annotation signaling the burn-in test harness to
+#      start its test suite (stress tests, memory, GPU, storage)
+#   3. Waits for the test harness to report results
+#   4. On success: labels the node as "production" (schedulable)
+#   5. Records the node as certified in the certified-nodes ConfigMap
+#
+# If burn-in fails, the node stays in "burn-in" phase and the CR
+# transitions to Failed for investigation by the hardware team.
+#
+# operatorConfig:
+#   workflow:
+#     name: burn-in-orchestration
+#     description: Orchestrate burn-in testing and certification for new hardware
+#     steps:
+#       - name: validate
+#         type: validateSpec
+#         description: Ensure CR has valid references
+#
+#       - name: fetch-node
+#         type: fetchNode
+#         description: Retrieve the target node
+#
+#       - name: mark-burn-in
+#         type: setLabel
+#         description: >
+#           Label node as "burn-in" phase. This prevents production
+#           schedulers from placing workloads on unvalidated hardware.
+#         params:
+#           labelKey: compute-platform.io/phase
+#           labelValueTemplate: "burn-in"
+#
+#       - name: signal-test-start
+#         type: setAnnotation
+#         description: >
+#           Signal the burn-in test harness to begin its test suite.
+#           The harness watches for this annotation on nodes.
+#         params:
+#           annotationKey: compute-platform.io/burn-in-start
+#           annotationValue: "true"
+#
+#       - name: wait-test-result
+#         type: checkAnnotation
+#         description: >
+#           Wait for the test harness to report results. The harness
+#           sets this annotation to "pass" on success. If it never
+#           appears (harness failure), the CR stays in waiting state.
+#         waitIfNotReady: true
+#         params:
+#           annotationKey: compute-platform.io/burn-in-result
+#           annotationValue: "pass"
+#
+#       - name: mark-production-ready
+#         type: setLabel
+#         description: >
+#           Burn-in passed — mark the node as production-ready.
+#           Schedulers can now place workloads on this node.
+#         params:
+#           labelKey: compute-platform.io/phase
+#           labelValueTemplate: "production"
+#
+#       - name: record-certified
+#         type: updateConfigMap
+#         description: >
+#           Record the node as certified in the hardware inventory
+#           ConfigMap for audit and tracking purposes.
+#         params:
+#           configMapNamespace: compute-platform-system
+#           configMapName: certified-nodes
+#           configMapKeyTemplate: "{{ .TenantName }}.{{ .NodeName }}"
+#           configMapValueTemplate: "certified"

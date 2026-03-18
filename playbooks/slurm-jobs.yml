@@ -1,0 +1,76 @@
+---
+- name: BCM Slurm Job Operations
+  hosts: headnode
+  gather_facts: no
+  tasks:
+    # --- Resume nodes first ---
+    - name: Resume all nodes
+      command: scontrol update nodename=node[001-003] state=resume
+      ignore_errors: yes
+      tags: [setup]
+
+    - name: Show cluster state
+      command: sinfo
+      register: pre_state
+      tags: [always]
+
+    - name: Display pre-job state
+      debug: var=pre_state.stdout_lines
+      tags: [always]
+
+    # --- Submit test job ---
+    - name: Submit hostname test job
+      shell: sbatch --wrap="hostname; sleep 5; echo DONE" --job-name=test-hostname -N1
+      register: submit_result
+      ignore_errors: yes
+      tags: [submit]
+
+    - name: Display submission result
+      debug: var=submit_result.stdout
+      tags: [submit]
+
+    # --- Monitor queue ---
+    - name: Show job queue
+      command: squeue -l
+      register: queue
+      tags: [monitor]
+
+    - name: Display queue
+      debug: var=queue.stdout_lines
+      tags: [monitor]
+
+    # --- Job history ---
+    - name: Show completed jobs
+      command: sacct --starttime=today -o JobID,JobName,Partition,State,ExitCode,Elapsed
+      register: history
+      ignore_errors: yes
+      tags: [history]
+
+    - name: Display history
+      debug: var=history.stdout_lines
+      tags: [history]
+
+    # --- Partition details ---
+    - name: Show partition details
+      command: scontrol show partitions
+      register: partitions
+      tags: [config]
+
+    - name: Show node details
+      command: scontrol show nodes
+      register: nodes
+      tags: [config]
+
+    - name: Show accounting clusters
+      command: sacctmgr show cluster
+      register: clusters
+      tags: [config]
+
+    - name: Display Slurm Report
+      debug:
+        msg: |
+          === PARTITIONS ===
+          {{ partitions.stdout }}
+          === CLUSTERS ===
+          {{ clusters.stdout }}
+      tags: [config]

@@ -1,0 +1,238 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Slurm Management — Partition & Node Operations via cmsh
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   # Setup Slurm (initial configuration)
+#   ansible-playbook playbooks/slurm_manage.yml -e "action=setup"
+#
+#   # Show Slurm status
+#   ansible-playbook playbooks/slurm_manage.yml -e "action=status"
+#
+#   # Drain nodes
+#   ansible-playbook playbooks/slurm_manage.yml \
+#       -e "action=drain" -e "targets=['cpu-n01']" -e "reason='maintenance'"
+#
+#   # Resume nodes
+#   ansible-playbook playbooks/slurm_manage.yml \
+#       -e "action=resume" -e "targets=['cpu-n01']"
+#
+#   # Submit test job
+#   ansible-playbook playbooks/slurm_manage.yml -e "action=test_job"
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Slurm Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    action: "status"
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else all_nodes }}"
+    drain_reason: "{{ reason | default('admin-action') }}"
+
+  tasks:
+    # ═══ ACTION: setup ═══
+    - name: "Setup Slurm partitions via cmsh"
+      when: action == "setup"
+      block:
+        - name: "Enable Slurm workload manager"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "
+              partition use default;
+              set wlm slurm;
+              commit
+            "
+          register: wlm_result
+          changed_when: "'committed' in wlm_result.stdout | default('')"
+
+        - name: "Create CPU partition"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "
+              partition;
+              add cpu;
+              set default yes;
+              set oversubscribe no;
+              set maximumtime 24:00:00;
+              commit
+            "
+          register: cpu_part
+          failed_when: false
+
+        - name: "Create GPU partition"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "
+              partition;
+              add gpu;
+              set default no;
+              set oversubscribe no;
+              set maximumtime 48:00:00;
+              commit
+            "
+          register: gpu_part
+          failed_when: false
+
+        - name: "Assign nodes to partitions"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "
+              partition use cpu;
+              append nodes cpu-n01,cpu-n02;
+              commit
+            "
+          register: assign_cpu
+          failed_when: false
+
+        - name: "Assign GPU nodes to partition"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "
+              partition use gpu;
+              append nodes gpu-n01;
+              commit
+            "
+          register: assign_gpu
+          failed_when: false
+
+        - name: "Restart Slurm services"
+          ansible.builtin.shell: |
+            systemctl restart slurmctld 2>/dev/null || echo "slurmctld not installed"
+          failed_when: false
+
+        - name: "Setup complete"
+          ansible.builtin.debug:
+            msg: "Slurm partitions configured: cpu (cpu-n01, cpu-n02), gpu (gpu-n01)"
+
+    # ═══ ACTION: status ═══
+    - name: "Show Slurm status"
+      when: action == "status"
+      block:
+        - name: "Partition info"
+          ansible.builtin.shell: sinfo -l 2>/dev/null || echo "Slurm not running"
+          register: sinfo_result
+          changed_when: false
+          failed_when: false
+
+        - name: "Display partitions"
+          ansible.builtin.debug:
+            msg: "{{ sinfo_result.stdout_lines }}"
+
+        - name: "Job queue"
+          ansible.builtin.shell: squeue -l 2>/dev/null || echo "No queue"
+          register: squeue_result
+          changed_when: false
+          failed_when: false
+
+        - name: "Display queue"
+          ansible.builtin.debug:
+            msg: "{{ squeue_result.stdout_lines }}"
+
+        - name: "Node details"
+          ansible.builtin.shell: scontrol show nodes 2>/dev/null || echo "No nodes"
+          register: scontrol_result
+          changed_when: false
+          failed_when: false
+
+        - name: "Display nodes"
+          ansible.builtin.debug:
+            msg: "{{ scontrol_result.stdout_lines }}"
+
+    # ═══ ACTION: drain ═══
+    - name: "Drain nodes"
+      when: action == "drain"
+      block:
+        - name: "Drain target nodes"
+          ansible.builtin.shell: |
+            scontrol update NodeName={{ item }} State=DRAIN Reason="{{ drain_reason }}"
+          loop: "{{ target_nodes }}"
+          register: drain_result
+          failed_when: false
+
+        - name: "Verify drain"
+          ansible.builtin.shell: sinfo -n {{ target_nodes | join(',') }} 2>/dev/null
+          register: verify
+          changed_when: false
+          failed_when: false
+
+        - name: "Drain result"
+          ansible.builtin.debug:
+            msg: "{{ verify.stdout_lines }}"
+
+    # ═══ ACTION: resume ═══
+    - name: "Resume nodes"
+      when: action == "resume"
+      block:
+        - name: "Resume target nodes"
+          ansible.builtin.shell: |
+            scontrol update NodeName={{ item }} State=RESUME
+          loop: "{{ target_nodes }}"
+          register: resume_result
+          failed_when: false
+
+        - name: "Verify resume"
+          ansible.builtin.shell: sinfo -n {{ target_nodes | join(',') }} 2>/dev/null
+          register: verify
+          changed_when: false
+          failed_when: false
+
+        - name: "Resume result"
+          ansible.builtin.debug:
+            msg: "{{ verify.stdout_lines }}"
+
+    # ═══ ACTION: test_job ═══
+    - name: "Submit test job"
+      when: action == "test_job"
+      block:
+        - name: "Create test job script"
+          ansible.builtin.copy:
+            dest: /tmp/slurm_test.sh
+            mode: '0755'
+            content: |
+              #!/bin/bash
+              #SBATCH --job-name=bcm-lab-test
+              #SBATCH --output=/tmp/slurm-test-%j.out
+              #SBATCH --ntasks=1
+              #SBATCH --cpus-per-task=1
+              #SBATCH --time=00:05:00
+
+              echo "═══════════════════════════════════════"
+              echo "BCM Lab Slurm Test Job"
+              echo "═══════════════════════════════════════"
+              echo "Date:     $(date)"
+              echo "Hostname: $(hostname)"
+              echo "Job ID:   $SLURM_JOB_ID"
+              echo "Node:     $SLURM_NODELIST"
+              echo "CPUs:     $SLURM_CPUS_ON_NODE"
+              echo ""
+              echo "System Info:"
+              uname -a
+              echo ""
+              echo "Memory:"
+              free -h
+              echo ""
+              echo "CPU Info:"
+              lscpu | head -15
+              echo ""
+              echo "Disk:"
+              df -h /
+              echo ""
+              echo "═══ TEST PASSED ═══"
+
+        - name: "Submit job"
+          ansible.builtin.shell: |
+            sbatch /tmp/slurm_test.sh 2>&1
+          register: submit_result
+          failed_when: false
+
+        - name: "Job submission result"
+          ansible.builtin.debug:
+            msg: "{{ submit_result.stdout | default('Failed to submit') }}"
+
+        - name: "Wait and check job status"
+          ansible.builtin.shell: |
+            sleep 10
+            squeue -u root 2>/dev/null
+          register: job_status
+          changed_when: false
+          failed_when: false
+
+        - name: "Job status"
+          ansible.builtin.debug:
+            msg: "{{ job_status.stdout_lines }}"

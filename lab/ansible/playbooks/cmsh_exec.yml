@@ -1,0 +1,54 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# cmsh Configuration — Run arbitrary cmsh commands
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   # Run a single cmsh command
+#   ansible-playbook playbooks/cmsh_exec.yml \
+#       -e "cmsh_command='device; list'"
+#
+#   # Run multiple commands
+#   ansible-playbook playbooks/cmsh_exec.yml \
+#       -e '{"cmsh_commands": ["device; list", "category; list", "partition; list"]}'
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "cmsh Command Execution"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    cmsh_command: ""
+    cmsh_commands: []
+
+  tasks:
+    # ── Single command mode ──
+    - name: "Execute single cmsh command"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "{{ cmsh_command }}"
+      register: single_result
+      changed_when: false
+      when: cmsh_command | length > 0
+
+    - name: "Command output"
+      ansible.builtin.debug:
+        msg: "{{ single_result.stdout_lines }}"
+      when: cmsh_command | length > 0
+
+    # ── Multi-command mode ──
+    - name: "Execute multiple cmsh commands"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "{{ item }}"
+      loop: "{{ cmsh_commands }}"
+      register: multi_result
+      changed_when: false
+      when: cmsh_commands | length > 0
+
+    - name: "Multi-command output"
+      ansible.builtin.debug:
+        msg: |
+          ── {{ item.item }} ──
+          {{ item.stdout }}
+      loop: "{{ multi_result.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: cmsh_commands | length > 0

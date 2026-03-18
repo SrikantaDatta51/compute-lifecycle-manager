@@ -1,0 +1,55 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 04 — Software Images
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - A Software Image = OS filesystem that nodes boot from
+#   - Images live in /cm/images/<name> on the head node
+#   - Categories reference images — all nodes in a category get same image
+#   - You can clone, customize, and swap images without touching nodes
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 04 — Software Images"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: Software Images"
+      ansible.builtin.debug:
+        msg: |
+          ── Software Images ──
+          BCM uses disk images stored on the head node.
+          Nodes PXE boot and mount these images at startup.
+          
+          Images contain: OS, kernel, packages, drivers.
+          GPU nodes get images with CUDA/NCCL pre-installed.
+
+    - name: "ACTION: List all software images"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'softwareimage; list'"
+      register: img_list
+      changed_when: false
+
+    - name: "OUTPUT: Available images"
+      ansible.builtin.debug:
+        msg: "{{ img_list.stdout_lines }}"
+
+    - name: "CONCEPT: Image → Category → Node chain"
+      ansible.builtin.debug:
+        msg: |
+          ── How Images Get to Nodes ──
+          
+          Software Image → assigned to Category → Category → contains Nodes
+          
+          "gpu-image"  →  gpu-compute category  →  gpu-n01
+          "default-image" → default category → cpu-n01, cpu-n02
+          
+          To deploy a new CUDA driver: update the gpu-image,
+          and ALL nodes in gpu-compute category get it on next boot.
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 04 Complete ═══
+          ✅ Listed software images
+          ✅ Understood Image → Category → Node chain
+          
+          NEXT: Lab 05 — Node Provisioning

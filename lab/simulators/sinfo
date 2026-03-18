@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════
+# Stateful sinfo Simulator
+# ═══════════════════════════════════════════════════════════════════
+STATE_DIR="${CMSH_STATE_DIR:-/tmp/bcm-lab-state}"
+SLURM_STATE="$STATE_DIR/slurm_nodes.json"
+
+[ ! -f "$SLURM_STATE" ] && echo "Slurm not configured" && exit 0
+
+# Parse arguments
+LONG=false NODE_FILTER="" FORMAT=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -l|--long) LONG=true ;;
+        -N) ;; # per-node
+        -n) shift; NODE_FILTER="$1" ;;
+        --format=*) FORMAT="${1#--format=}" ;;
+        --format) shift; FORMAT="$1" ;;
+    esac
+    shift
+done
+
+python3 -c "
+import json
+with open('$SLURM_STATE') as f: data = json.load(f)
+
+node_filter = '$NODE_FILTER'
+long_fmt = $( [ "$LONG" = "true" ] && echo "True" || echo "False" )
+
+# Group by partition
+partitions = {}
+for name, n in sorted(data.items()):
+    if node_filter and name not in node_filter.split(','):
+        continue
+    p = n['partition']
+    if p not in partitions:
+        partitions[p] = {'nodes':[], 'avail':'up', 'state': n['state']}
+    partitions[p]['nodes'].append(name)
+
+if long_fmt:
+    print(f'{\"PARTITION\":<12s} {\"AVAIL\":<8s} {\"TIMELIMIT\":<12s} {\"NODES\":<6s} {\"STATE\":<12s} {\"NODELIST\":<20s}')
+    for p, info in sorted(partitions.items()):
+        defmark = '*' if p == 'cpu' else ''
+        nodelist = ','.join(info['nodes'])
+        for name in info['nodes']:
+            n = data[name]
+            print(f'{p+defmark:<12s} {\"up\":<8s} {\"24:00:00\":<12s} {1:<6d} {n[\"state\"]:<12s} {name:<20s}')
+else:
+    print(f'{\"PARTITION\":<12s} {\"AVAIL\":<8s} {\"NODES\":<6s} {\"STATE\":<12s} {\"NODELIST\":<20s}')
+    for p, info in sorted(partitions.items()):
+        defmark = '*' if p == 'cpu' else ''
+        for name in info['nodes']:
+            n = data[name]
+            print(f'{p+defmark:<12s} {\"up\":<8s} {1:<6d} {n[\"state\"]:<12s} {name:<20s}')
+"

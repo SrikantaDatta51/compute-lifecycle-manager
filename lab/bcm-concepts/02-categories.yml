@@ -1,0 +1,102 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 02 — Categories
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - Categories group nodes with identical configuration
+#   - All nodes in a category share: software image, kernel, roles
+#   - Typical categories: cpu-compute, gpu-compute, login, storage
+#   - Changing a category setting affects ALL nodes in that category
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 02 — Categories"
+  hosts: bcm_headnodes
+  gather_facts: false
+
+  tasks:
+    - name: "CONCEPT: What are Categories?"
+      ansible.builtin.debug:
+        msg: |
+          ── Categories ──
+          A Category is a template that defines shared config for a group of nodes:
+            - Software Image (OS + packages)
+            - Kernel version
+            - Roles (services to run)
+          
+          Think of it like: "All GPU nodes get the same image with CUDA drivers"
+
+    - name: "ACTION: List all categories"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "category; list"
+      register: cat_list
+      changed_when: false
+
+    - name: "OUTPUT: Current categories"
+      ansible.builtin.debug:
+        msg: "{{ cat_list.stdout_lines }}"
+
+    - name: "ACTION: Create a new category 'login-nodes'"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "category; add login-nodes; commit"
+      register: cat_add
+
+    - name: "OUTPUT: Category created"
+      ansible.builtin.debug:
+        msg: "{{ cat_add.stdout_lines }}"
+
+    - name: "ACTION: Verify new category appears in list"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "category; list"
+      register: cat_list2
+      changed_when: false
+
+    - name: "OUTPUT: Updated category list"
+      ansible.builtin.debug:
+        msg: "{{ cat_list2.stdout_lines }}"
+
+    - name: "CONCEPT: Moving nodes between categories"
+      ansible.builtin.debug:
+        msg: |
+          ── Assigning Nodes to Categories ──
+          To change a node's category:
+            cmsh device; use <node>; set category <category>; commit
+          
+          This will reconfigure the node with the new category's settings.
+          ⚠️ In production, this typically triggers a re-provision!
+
+    - name: "ACTION: Move cpu-n02 to 'login-nodes' category"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n02; set category login-nodes; commit"
+      register: move_node
+
+    - name: "OUTPUT: Node moved"
+      ansible.builtin.debug:
+        msg: "{{ move_node.stdout_lines }}"
+
+    - name: "ACTION: Verify — show device list with category column"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; list"
+      register: verify_cat
+      changed_when: false
+
+    - name: "OUTPUT: cpu-n02 now in login-nodes"
+      ansible.builtin.debug:
+        msg: "{{ verify_cat.stdout_lines }}"
+
+    - name: "ACTION: Move cpu-n02 back to default"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n02; set category default; commit"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 02 Complete ═══
+          ✅ Listed categories: cmsh category; list
+          ✅ Created new category 'login-nodes'
+          ✅ Moved cpu-n02 to login-nodes (saw it change in device list)
+          ✅ Moved cpu-n02 back to default
+          
+          KEY TAKEAWAY: Categories are how you manage fleet-wide configuration.
+          Change the category → all nodes in that category update.
+          
+          NEXT: Lab 03 — Node Status & Lifecycle

@@ -1,0 +1,5 @@
+# NCCL Hostfile for DGX H200 Cluster
+# One hostname per line, with optional slots= for GPUs per node
+# Example for 2-node, 8-GPU-per-node setup:
+skt-h200-dgx001 slots=8
+skt-h200-dgx002 slots=8

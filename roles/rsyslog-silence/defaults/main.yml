@@ -1,0 +1,32 @@
+---
+# ─── RSyslog MLX5 Log Silencing — Default Variables ──────────────────
+# Override in group_vars/all.yml per environment as needed.
+# ─────────────────────────────────────────────────────────────────────
+
+# Filter mode: "drop" silences completely, "route" saves to separate file
+rsyslog_filter_mode: "drop"
+
+# When filter_mode is "route", log matching messages here instead of /var/log/syslog
+rsyslog_noise_log_path: "/var/log/kernel-noise.log"
+
+# RSyslog config file name (loaded alphabetically — 10 = early priority)
+rsyslog_filter_filename: "10-mlx5-filter.conf"
+rsyslog_filter_dest: "/etc/rsyslog.d/{{ rsyslog_filter_filename }}"
+
+# Backup directory for pre-change state
+rsyslog_backup_dir: "/var/backups/rsyslog"
+
+# Patterns to filter — extend as needed for additional noisy messages
+rsyslog_filter_patterns:
+  - pattern: "ACCESS_REG(0x805)"
+    description: "mlx5 ACCESS_REG register failure (err-22)"
+  - pattern: "mlx5_cmd_out_err"
+    description: "mlx5 command output error (suppressed callbacks)"
+
+# Whether to run the validation test after deployment
+rsyslog_run_tests: true
+
+# Whether to create a logrotate config for the noise log (when mode=route)
+rsyslog_logrotate: true
+rsyslog_logrotate_days: 7
+rsyslog_logrotate_size: "50M"

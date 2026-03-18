@@ -1,0 +1,28 @@
+[Unit]
+Description=Fleet Validation Framework — Daily Node Certification
+Documentation=https://github.com/your-org/bcm-iac/tree/main/fleet-validator
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/fleet-validator/bin/fleet-certify.sh
+
+[Service]
+Type=oneshot
+ExecStart=/opt/fleet-validator/bin/fleet-certify.sh --suite daily-quick
+WorkingDirectory=/opt/fleet-validator
+Environment=FLEET_VALIDATOR_HOME=/opt/fleet-validator
+Environment=CMSH_BIN=/usr/bin/cmsh
+Environment=PUSHGATEWAY_URL=http://localhost:9091
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=14400
+# Run as root (required for cmsh access)
+User=root
+Group=root
+# Logging
+SyslogIdentifier=fleet-validator
+# Restart on failure — but only once to avoid loops
+Restart=on-failure
+RestartSec=3600
+
+[Install]
+WantedBy=multi-user.target

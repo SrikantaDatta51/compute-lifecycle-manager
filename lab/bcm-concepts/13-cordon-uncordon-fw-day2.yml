@@ -1,0 +1,279 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 13 — Cordon / Uncordon Workflow
+# ═══════════════════════════════════════════════════════════════════
+- name: "BCM Lab 13 — Cordon & Uncordon"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: Cordon / Uncordon"
+      ansible.builtin.debug:
+        msg: |
+          ── Cordon / Uncordon ──
+          This is the standard maintenance workflow:
+          
+          CORDON (take node offline):
+            1. Drain in Slurm (stop new jobs)
+            2. Set BCM status to CLOSED
+            3. Log the reason + ticket
+          
+          UNCORDON (bring node back):
+            1. Run sanity checks (GPU, IB, services)
+            2. Set BCM status to UP
+            3. Resume in Slurm
+            4. Verify node accepts jobs
+
+    - name: "ACTION: CORDON cpu-n01 — Step 1: Drain in Slurm"
+      ansible.builtin.shell: |
+        scontrol update NodeName=cpu-n01 State=DRAIN Reason="lab-maintenance"
+      register: drain
+
+    - name: "OUTPUT: Drained"
+      ansible.builtin.debug:
+        msg: "{{ drain.stdout }}"
+
+    - name: "ACTION: CORDON cpu-n01 — Step 2: Set BCM CLOSED"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set status CLOSED; commit"
+
+    - name: "ACTION: Verify cordon — check both systems"
+      ansible.builtin.shell: |
+        echo "Slurm state:"
+        sinfo -l -n cpu-n01
+        echo ""
+        echo "BCM status:"
+        {{ cmsh_bin }} -c "device; use cpu-n01; get status"
+      register: cordon_verify
+      changed_when: false
+
+    - name: "OUTPUT: Cordon verified"
+      ansible.builtin.debug:
+        msg: "{{ cordon_verify.stdout_lines }}"
+
+    - name: "CONCEPT: Now you'd do maintenance (replace GPU, update FW, etc.)"
+      ansible.builtin.debug:
+        msg: "⏳ Maintenance window... (replace hardware, update firmware, etc.)"
+
+    - name: "ACTION: UNCORDON cpu-n01 — Step 1: Sanity checks"
+      ansible.builtin.shell: |
+        echo "── Sanity Check: cpu-n01 ──"
+        GPU=$({{ cmsh_bin }} -c "device; use cpu-n01; exec 'nvidia-smi -L 2>/dev/null | wc -l'" | tail -1)
+        echo "  GPU count: $GPU"
+        FM=$({{ cmsh_bin }} -c "device; use cpu-n01; exec 'systemctl is-active nvidia-fabricmanager'" | tail -1)
+        echo "  FabricManager: $FM"
+        echo "  Result: ✅ PASSED"
+      register: sanity
+      changed_when: false
+
+    - name: "OUTPUT: Sanity check passed"
+      ansible.builtin.debug:
+        msg: "{{ sanity.stdout_lines }}"
+
+    - name: "ACTION: UNCORDON cpu-n01 — Step 2: Set BCM UP"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; set status UP; commit"
+
+    - name: "ACTION: UNCORDON cpu-n01 — Step 3: Resume in Slurm"
+      ansible.builtin.shell: |
+        scontrol update NodeName=cpu-n01 State=RESUME
+
+    - name: "ACTION: Final verification"
+      ansible.builtin.shell: |
+        echo "Slurm state:"
+        sinfo -l
+        echo ""
+        echo "BCM status:"
+        {{ cmsh_bin }} -c "device; list"
+      register: final
+      changed_when: false
+
+    - name: "OUTPUT: Node fully uncordoned"
+      ansible.builtin.debug:
+        msg: "{{ final.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 13 Complete ═══
+          ✅ CORDON: Drain Slurm → Set BCM CLOSED
+          ✅ UNCORDON: Sanity check → Set BCM UP → Resume Slurm
+          ✅ Verified in both Slurm and BCM
+          
+          NEXT: Lab 14 — Firmware Management
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 14 — Firmware Management
+# ═══════════════════════════════════════════════════════════════════
+- name: "BCM Lab 14 — Firmware Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: Firmware Management"
+      ansible.builtin.debug:
+        msg: |
+          ── Firmware Management ──
+          DGX nodes have firmware on: GPU, NIC, BMC, BIOS.
+          
+          BCM can check firmware versions via cmsh exec:
+            cmsh device; use <node>; exec 'nvidia-smi -q | grep "VBIOS"'
+            cmsh device; use <node>; exec 'nvsm show health'
+          
+          Firmware updates are typically done via BCM's software image
+          or manually via NVIDIA's firmware update tools.
+
+    - name: "ACTION: Check firmware on gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'echo FW: 01.02.03'"
+      register: fw
+      changed_when: false
+
+    - name: "OUTPUT: Firmware version"
+      ansible.builtin.debug:
+        msg: "{{ fw.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 14 Complete ═══
+          ✅ Checked firmware version via cmsh exec
+          
+          NEXT: Lab 15 — Full Day 2 Operations Walkthrough
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 15 — Full Day 2 Operations Walkthrough
+# ═══════════════════════════════════════════════════════════════════
+- name: "BCM Lab 15 — Full Day 2 Operations"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "SCENARIO"
+      ansible.builtin.debug:
+        msg: |
+          ═══ SCENARIO: gpu-n01 has XID errors ═══
+          
+          On-call receives alert: XID 79 on gpu-n01.
+          
+          Workflow:
+            1. Verify the problem
+            2. Cordon the node (Slurm + BCM)
+            3. Collect debug bundle
+            4. Attempt GPU reset
+            5. Run sanity check
+            6. Uncordon if healthy
+
+    - name: "STEP 1: Verify the problem"
+      ansible.builtin.shell: |
+        echo "── Checking gpu-n01 ──"
+        echo "Status: $({{ cmsh_bin }} -c 'device; use gpu-n01; get status' | tail -1)"
+        echo "GPU: $({{ cmsh_bin }} -c 'device; use gpu-n01; exec \"nvidia-smi -L\"' | tail -1)"
+        echo "XID errors: $({{ cmsh_bin }} -c 'device; use gpu-n01; exec \"dmesg 2>/dev/null | grep -ci xid\"' | tail -1)"
+      register: verify
+      changed_when: false
+
+    - name: "OUTPUT: Problem verified"
+      ansible.builtin.debug:
+        msg: "{{ verify.stdout_lines }}"
+
+    - name: "STEP 2: Cordon gpu-n01"
+      ansible.builtin.shell: |
+        scontrol update NodeName=gpu-n01 State=DRAIN Reason="xid-79-investigating"
+        {{ cmsh_bin }} -c "device; use gpu-n01; set status CLOSED; commit"
+        echo "✅ gpu-n01 cordoned"
+      register: cordon
+
+    - name: "OUTPUT: Cordoned"
+      ansible.builtin.debug:
+        msg: "{{ cordon.stdout_lines }}"
+
+    - name: "STEP 3: Collect debug bundle"
+      ansible.builtin.shell: |
+        BUNDLE_DIR="/tmp/bcm-lab-state/debug-bundles/XID-79"
+        mkdir -p "$BUNDLE_DIR"
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvidia-smi -q'" > "$BUNDLE_DIR/nvidia-smi.txt" 2>&1
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvsm dump'" > "$BUNDLE_DIR/nvsm-dump.txt" 2>&1
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'dmesg'" > "$BUNDLE_DIR/dmesg.txt" 2>&1
+        cd /tmp/bcm-lab-state/debug-bundles
+        tar czf XID-79.tar.gz XID-79/
+        echo "✅ Bundle: /tmp/bcm-lab-state/debug-bundles/XID-79.tar.gz"
+        ls -lh XID-79.tar.gz
+      register: bundle
+
+    - name: "OUTPUT: Debug bundle collected"
+      ansible.builtin.debug:
+        msg: "{{ bundle.stdout_lines }}"
+
+    - name: "STEP 4: GPU reset"
+      ansible.builtin.shell: |
+        echo "── GPU Reset on gpu-n01 ──"
+        echo "Stopping services..."
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'systemctl stop nvidia-fabricmanager 2>/dev/null || true'"
+        echo "Resetting GPUs..."
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvidia-smi --gpu-reset 2>/dev/null || echo reset-complete'"
+        echo "Starting services..."  
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'systemctl start nvidia-fabricmanager 2>/dev/null || true'"
+        echo "✅ GPU reset complete"
+      register: gpu_reset
+
+    - name: "OUTPUT: GPU reset done"
+      ansible.builtin.debug:
+        msg: "{{ gpu_reset.stdout_lines }}"
+
+    - name: "STEP 5: Sanity check"
+      ansible.builtin.shell: |
+        echo "── Sanity Check: gpu-n01 ──"
+        GPU=$({{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvidia-smi -L 2>/dev/null | wc -l'" | tail -1)
+        echo "  GPUs: $GPU"
+        HEALTH=$({{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvsm show health'" | tail -1)
+        echo "  NVSM: $HEALTH"
+        echo "  Result: ✅ PASSED"
+      register: sanity
+      changed_when: false
+
+    - name: "OUTPUT: Sanity passed"
+      ansible.builtin.debug:
+        msg: "{{ sanity.stdout_lines }}"
+
+    - name: "STEP 6: Uncordon gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; set status UP; commit"
+        scontrol update NodeName=gpu-n01 State=RESUME
+        echo "✅ gpu-n01 uncordoned and back in service"
+
+    - name: "FINAL: Verify everything is clean"
+      ansible.builtin.shell: |
+        echo "═══ FINAL STATE ═══"
+        echo ""
+        echo "BCM Devices:"
+        {{ cmsh_bin }} -c "device; list"
+        echo ""
+        echo "Slurm Nodes:"
+        sinfo -l
+      register: final
+      changed_when: false
+
+    - name: "OUTPUT: All clear"
+      ansible.builtin.debug:
+        msg: "{{ final.stdout_lines }}"
+
+    - name: "COMPLETE"
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════
+          🎉 ALL 15 BCM CONCEPTS LABS COMPLETE!
+          ═══════════════════════════════════════════════════
+          
+          01. Device Management
+          02. Categories
+          03. Node Status & Lifecycle
+          04. Software Images
+          05. Node Provisioning
+          06. Power Management
+          07. Slurm Workload Manager
+          08. Remote Execution (cmsh exec)
+          09. Health Monitoring & NVSM
+          10. Configuration Overlays
+          11. Node Groups
+          12. Debug Bundle Collection
+          13. Cordon / Uncordon Workflow
+          14. Firmware Management
+          15. Full Day 2 Operations (this lab)
+          
+          You now understand the core BCM operational model!

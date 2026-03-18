@@ -1,0 +1,36 @@
+---
+# BCM Slurm Operations Role
+# Manages Slurm partitions, node states, and jobs
+
+- name: Show Slurm partition info
+  shell: sinfo
+  register: sinfo_out
+  failed_when: false
+
+- name: Show Slurm node details
+  shell: scontrol show nodes 2>/dev/null | head -40
+  register: nodes_out
+  failed_when: false
+
+- name: Resume drained nodes
+  shell: |
+    for node in $(sinfo -N -h -t drain | awk '{print $1}'); do
+      scontrol update nodename=$node state=resume
+      echo "Resumed: $node"
+    done
+  register: resume_out
+  when: slurm_resume_drained | default(false) | bool
+  tags: [resume]
+
+- name: Show Slurm job queue
+  shell: squeue -l 2>/dev/null || echo "No jobs"
+  register: queue_out
+  failed_when: false
+
+- name: Report Slurm status
+  debug:
+    msg: |
+      === Partitions ===
+      {{ sinfo_out.stdout | default('N/A') }}
+      === Jobs ===
+      {{ queue_out.stdout | default('N/A') }}

@@ -1,0 +1,12 @@
+apiVersion: computeplatform.io/v1alpha1
+kind: TenantNodeAssignment
+metadata:
+  name: tenant-a-worker-node-01
+  namespace: compute-platform-system
+spec:
+  tenantRef:
+    name: tenant-a
+  nodeRef:
+    name: minikube
+  activation:
+    enabled: true

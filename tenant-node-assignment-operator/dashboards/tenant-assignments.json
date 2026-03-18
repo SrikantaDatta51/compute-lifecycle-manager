@@ -1,0 +1,123 @@
+{
+    "description": "Business-level view of tenant node assignments",
+    "editable": true,
+    "panels": [
+        {
+            "title": "Active Assignments by Tenant",
+            "type": "table",
+            "gridPos": {
+                "h": 10,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "tenantnodeassignment_info",
+                    "format": "table",
+                    "legendFormat": ""
+                }
+            ],
+            "transformations": [
+                {
+                    "id": "organize",
+                    "options": {
+                        "excludeByName": {
+                            "Time": true,
+                            "__name__": true
+                        },
+                        "renameByName": {
+                            "tenant": "Tenant",
+                            "node": "Node",
+                            "phase": "Phase",
+                            "namespace": "Namespace"
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "title": "Assignment Lifecycle Duration",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 10
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, rate(tenantnodeassignment_lifecycle_duration_seconds_bucket[1h]))",
+                    "legendFormat": "p95 time to Ready"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s"
+                }
+            }
+        },
+        {
+            "title": "Readiness Status by Tenant",
+            "type": "bargauge",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 10
+            },
+            "targets": [
+                {
+                    "expr": "count by (tenant) (tenantnodeassignment_status_phase{phase=\"Ready\"})",
+                    "legendFormat": "{{tenant}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "green",
+                                "value": 1
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "title": "Failed Assignments",
+            "type": "table",
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 18
+            },
+            "targets": [
+                {
+                    "expr": "tenantnodeassignment_info{phase=\"Failed\"}",
+                    "format": "table"
+                }
+            ]
+        }
+    ],
+    "schemaVersion": 39,
+    "tags": [
+        "operator",
+        "compute-platform",
+        "tenant-assignment",
+        "business"
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "title": "Tenant Node Assignments — Business View",
+    "uid": "tna-tenant-assignments",
+    "version": 1
+}

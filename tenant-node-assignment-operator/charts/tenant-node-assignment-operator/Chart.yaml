@@ -1,0 +1,14 @@
+apiVersion: v2
+name: tenant-node-assignment-operator
+description: A Kubernetes operator for tenant-driven node assignment with YAML-configurable workflows
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - operator
+  - tenant
+  - node-assignment
+  - compute-platform
+maintainers:
+  - name: Compute Platform Team

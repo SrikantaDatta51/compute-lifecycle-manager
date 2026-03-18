@@ -1,0 +1,264 @@
+---
+# ─── BCM Firmware Upgrade ────────────────────────────────────────────
+# Orchestrates firmware upgrades on DGX/GPU nodes via BCM.
+# Based on DGX B200 SOP-210 firmware upgrade procedures.
+#
+# Usage:
+#   make firmware-upgrade ENV=az2-bmaas-prod
+#   ansible-playbook -i inventories/az2-bmaas-prod/hosts.yml playbooks/firmware-upgrade.yml
+#
+# SAFETY:
+#   - Always run firmware-audit FIRST to baseline
+#   - Runs in --check mode by default (use -e fw_apply=true to apply)
+#   - Drains nodes from Slurm before upgrade
+#   - Reboots nodes after upgrade
+#   - Verifies firmware post-upgrade
+#
+# Tags: pre-check, drain, upgrade-gpu, upgrade-bios, upgrade-bmc,
+#       upgrade-nic, reboot, verify, resume
+# ──────────────────────────────────────────────────────────────────────
+
+- name: BCM Firmware Upgrade
+  hosts: headnode
+  gather_facts: false
+  tags: [firmware-upgrade]
+
+  vars:
+    fw_apply: false
+    fw_target_nodes: "{{ fw_nodes | default(bcm_categories[0].nodes | default([])) }}"
+    fw_max_parallel: "{{ max_concurrent_provisions | default(5) }}"
+    fw_gpu_driver_version: "{{ target_gpu_driver | default('') }}"
+    fw_bios_file: "{{ bios_firmware_file | default('') }}"
+    fw_bmc_file: "{{ bmc_firmware_file | default('') }}"
+    fw_nic_file: "{{ nic_firmware_file | default('') }}"
+
+  tasks:
+    # ─── Pre-Flight Checks ───────────────────────────────────────────
+    - name: Display upgrade plan
+      debug:
+        msg: |
+          ╔══════════════════════════════════════════════════╗
+          ║         FIRMWARE UPGRADE — {{ env_name }}
+          ╠══════════════════════════════════════════════════╣
+          ║ Mode:    {{ 'APPLY' if fw_apply else 'DRY-RUN (use -e fw_apply=true)' }}
+          ║ Nodes:   {{ fw_target_nodes | join(', ') }}
+          ║ GPU:     {{ fw_gpu_driver_version | default('unchanged') }}
+          ║ BIOS:    {{ fw_bios_file | default('unchanged') }}
+          ║ BMC:     {{ fw_bmc_file | default('unchanged') }}
+          ║ NIC:     {{ fw_nic_file | default('unchanged') }}
+          ╚══════════════════════════════════════════════════╝
+      tags: [pre-check]
+
+    - name: Pre-flight — verify Slurm is healthy
+      shell: |
+        echo "=== Slurm Status ==="
+        sinfo
+        echo ""
+        echo "=== Running Jobs ==="
+        squeue -l 2>/dev/null | head -10
+        echo ""
+        echo "=== Target Node States ==="
+        {% for node in fw_target_nodes %}
+        scontrol show node {{ node }} 2>/dev/null | grep -E "NodeName|State" | head -2
+        {% endfor %}
+      register: pre_flight
+      tags: [pre-check]
+
+    - name: Display pre-flight
+      debug:
+        msg: "{{ pre_flight.stdout }}"
+      tags: [pre-check]
+
+    - name: SAFETY — abort if jobs running on target nodes
+      shell: |
+        running=$(squeue -w {{ fw_target_nodes | join(',') }} -h 2>/dev/null | wc -l)
+        if [ "$running" -gt 0 ]; then
+          echo "ABORT: $running jobs running on target nodes"
+          exit 1
+        fi
+        echo "OK: No jobs on target nodes"
+      register: safety_check
+      failed_when: safety_check.rc != 0
+      tags: [pre-check]
+      when: fw_apply | bool
+
+    # ─── Drain Nodes ─────────────────────────────────────────────────
+    - name: Drain target nodes from Slurm
+      shell: |
+        {% for node in fw_target_nodes %}
+        scontrol update nodename={{ node }} state=drain reason="firmware_upgrade"
+        echo "Drained: {{ node }}"
+        {% endfor %}
+      register: drain_result
+      tags: [drain]
+      when: fw_apply | bool
+
+    - name: Display drain status
+      debug:
+        msg: "{{ drain_result.stdout | default('DRY-RUN: would drain nodes') }}"
+      tags: [drain]
+
+    # ─── GPU Driver Upgrade ──────────────────────────────────────────
+    - name: Upgrade GPU driver in software image
+      shell: |
+        echo "=== GPU Driver Upgrade ==="
+        {% if fw_gpu_driver_version %}
+        echo "Target version: {{ fw_gpu_driver_version }}"
+        # Check current version in image
+        chroot_cmd="chroot /cm/images/{{ bcm_image }} nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo 'not installed'"
+        current=$($chroot_cmd | head -1)
+        echo "Current in image: $current"
+
+        if [ "{{ fw_apply }}" = "true" ]; then
+          echo "Upgrading GPU driver in image {{ bcm_image }}..."
+          cmsh -c "softwareimage; use {{ bcm_image }}; chroot; apt update && apt install -y nvidia-driver-{{ fw_gpu_driver_version }} 2>&1 | tail -3; exit"
+          echo "GPU driver upgrade applied to image"
+        else
+          echo "DRY-RUN: would upgrade to {{ fw_gpu_driver_version }} in {{ bcm_image }}"
+        fi
+        {% else %}
+        echo "Skipped — no target version specified (use -e target_gpu_driver=560)"
+        {% endif %}
+      register: gpu_upgrade
+      tags: [upgrade-gpu]
+
+    - name: Display GPU upgrade status
+      debug:
+        msg: "{{ gpu_upgrade.stdout }}"
+      tags: [upgrade-gpu]
+
+    # ─── BIOS Upgrade ────────────────────────────────────────────────
+    - name: Upgrade BIOS firmware
+      shell: |
+        echo "=== BIOS Firmware Upgrade ==="
+        {% if fw_bios_file %}
+        {% for node in fw_target_nodes %}
+        echo "--- {{ node }} ---"
+        if [ "{{ fw_apply }}" = "true" ]; then
+          ssh -o StrictHostKeyChecking=no root@{{ node }} "
+            # DGX B200: use nvidia-bios-update or flashrom
+            if command -v nvidia-bios-update &>/dev/null; then
+              nvidia-bios-update {{ fw_bios_file }} 2>&1 | tail -5
+            else
+              echo 'nvidia-bios-update not found — manual BIOS update required'
+            fi
+          " 2>/dev/null || echo "UNREACHABLE"
+        else
+          echo "DRY-RUN: would flash {{ fw_bios_file }}"
+        fi
+        {% endfor %}
+        {% else %}
+        echo "Skipped — no BIOS file specified (use -e bios_firmware_file=/path/to/bios.bin)"
+        {% endif %}
+      register: bios_upgrade
+      tags: [upgrade-bios]
+
+    # ─── BMC Upgrade ─────────────────────────────────────────────────
+    - name: Upgrade BMC firmware
+      shell: |
+        echo "=== BMC Firmware Upgrade ==="
+        {% if fw_bmc_file %}
+        {% for node in fw_target_nodes %}
+        echo "--- {{ node }} ---"
+        if [ "{{ fw_apply }}" = "true" ]; then
+          ssh -o StrictHostKeyChecking=no root@{{ node }} "
+            if command -v ipmitool &>/dev/null; then
+              ipmitool mc info | grep 'Firmware Revision'
+              echo 'BMC firmware update requires out-of-band access (iDRAC/BMC web UI)'
+              echo 'Use: ipmitool -I lanplus -H <bmc-ip> -U admin -P <pass> mc update {{ fw_bmc_file }}'
+            fi
+          " 2>/dev/null || echo "UNREACHABLE"
+        else
+          echo "DRY-RUN: would flash {{ fw_bmc_file }}"
+        fi
+        {% endfor %}
+        {% else %}
+        echo "Skipped — no BMC file specified"
+        {% endif %}
+      register: bmc_upgrade
+      tags: [upgrade-bmc]
+
+    # ─── NIC Firmware Upgrade ────────────────────────────────────────
+    - name: Upgrade NIC firmware (Mellanox ConnectX)
+      shell: |
+        echo "=== NIC Firmware Upgrade ==="
+        {% if fw_nic_file %}
+        {% for node in fw_target_nodes %}
+        echo "--- {{ node }} ---"
+        if [ "{{ fw_apply }}" = "true" ]; then
+          ssh -o StrictHostKeyChecking=no root@{{ node }} "
+            if command -v mlxfwmanager &>/dev/null; then
+              mlxfwmanager --update --image {{ fw_nic_file }} --yes 2>&1 | tail -10
+            else
+              echo 'mlxfwmanager not found — install mft tools'
+            fi
+          " 2>/dev/null || echo "UNREACHABLE"
+        else
+          echo "DRY-RUN: would flash {{ fw_nic_file }}"
+        fi
+        {% endfor %}
+        {% else %}
+        echo "Skipped — no NIC firmware file specified"
+        {% endif %}
+      register: nic_upgrade
+      tags: [upgrade-nic]
+
+    # ─── Reboot Nodes ────────────────────────────────────────────────
+    - name: Reboot nodes after firmware upgrade
+      shell: |
+        echo "=== Post-Upgrade Reboot ==="
+        {% for node in fw_target_nodes %}
+        if [ "{{ fw_apply }}" = "true" ]; then
+          echo "Rebooting {{ node }}..."
+          ssh -o StrictHostKeyChecking=no root@{{ node }} "reboot" 2>/dev/null &
+        else
+          echo "DRY-RUN: would reboot {{ node }}"
+        fi
+        {% endfor %}
+        {% if fw_apply | bool %}
+        echo "Waiting 120s for nodes to come back..."
+        sleep 120
+        {% endif %}
+      register: reboot_result
+      tags: [reboot]
+
+    # ─── Post-Upgrade Verification ───────────────────────────────────
+    - name: Verify firmware versions post-upgrade
+      shell: |
+        echo "=== Post-Upgrade Verification ==="
+        {% for node in fw_target_nodes %}
+        echo "--- {{ node }} ---"
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@{{ node }} '
+          echo "BIOS:   $(dmidecode -t bios 2>/dev/null | grep Version | head -1 || echo N/A)"
+          echo "BMC:    $(ipmitool mc info 2>/dev/null | grep "Firmware Revision" || echo N/A)"
+          echo "GPU:    $(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+          echo "VBIOS:  $(nvidia-smi --query-gpu=vbios_version --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+          echo "Kernel: $(uname -r)"
+        ' 2>/dev/null || echo "UNREACHABLE — node may still be rebooting"
+        {% endfor %}
+      register: verify_result
+      tags: [verify]
+
+    - name: Display verification
+      debug:
+        msg: "{{ verify_result.stdout }}"
+      tags: [verify]
+
+    # ─── Resume Nodes ────────────────────────────────────────────────
+    - name: Resume nodes in Slurm
+      shell: |
+        {% for node in fw_target_nodes %}
+        scontrol update nodename={{ node }} state=resume
+        echo "Resumed: {{ node }}"
+        {% endfor %}
+      register: resume_result
+      tags: [resume]
+      when: fw_apply | bool
+
+    - name: Final status
+      debug:
+        msg: |
+          ╔══════════════════════════════════════════════════╗
+          ║  Firmware upgrade {{ 'COMPLETE' if fw_apply else 'DRY-RUN COMPLETE' }}
+          ║  Nodes: {{ fw_target_nodes | join(', ') }}
+          ╚══════════════════════════════════════════════════╝

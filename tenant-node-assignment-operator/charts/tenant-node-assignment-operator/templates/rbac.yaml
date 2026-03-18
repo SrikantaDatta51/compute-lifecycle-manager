@@ -1,0 +1,50 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "tenant-node-assignment-operator.fullname" . }}
+  labels:
+    {{- include "tenant-node-assignment-operator.labels" . | nindent 4 }}
+rules:
+  # TenantNodeAssignment CRD
+  - apiGroups: ["computeplatform.io"]
+    resources: ["tenantnodeassignments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["computeplatform.io"]
+    resources: ["tenantnodeassignments/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["computeplatform.io"]
+    resources: ["tenantnodeassignments/finalizers"]
+    verbs: ["update"]
+  # Nodes — read and label
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # ConfigMaps — readiness tracking
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Events — for human debugging
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "tenant-node-assignment-operator.fullname" . }}
+  labels:
+    {{- include "tenant-node-assignment-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "tenant-node-assignment-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tenant-node-assignment-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

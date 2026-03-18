@@ -1,0 +1,70 @@
+---
+# ─── BCM DNS Configuration ───────────────────────────────────────────
+# Configures DNS on managed nodes via cmsh categories and overlays.
+# Uses variables from group_vars/all.yml per environment.
+#
+# Usage:
+#   make dns ENV=az2-staging
+#   ansible-playbook -i inventories/az2-staging/hosts.yml playbooks/dns-config.yml
+# ──────────────────────────────────────────────────────────────────────
+
+- name: Configure DNS on BCM Cluster
+  hosts: headnode
+  gather_facts: false
+  tags: [dns]
+
+  tasks:
+    - name: Display environment info
+      debug:
+        msg: "Configuring DNS for {{ env_name }} ({{ env_description }})"
+
+    - name: Set global nameservers via cmsh
+      shell: |
+        cmsh -c "base; set nameservers {{ dns_nameservers | join(' ') }}; commit"
+      register: dns_global
+      changed_when: "'commit' in dns_global.stdout"
+      tags: [dns-global]
+
+    - name: Set network domain
+      shell: |
+        cmsh -c "network; use {{ bcm_internal_network }}; set domainname {{ bcm_domain }}; commit"
+      register: dns_domain
+      tags: [dns-domain]
+
+    - name: Configure DNS per category
+      shell: |
+        cmsh -c "category; use {{ item.name }}; roles; use resolvconf; set nameservers {{ dns_nameservers | join(' ') }}; set searchdomains {{ dns_search_domains | join(' ') }}; commit"
+      loop: "{{ bcm_categories }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: dns_category
+      when: bcm_categories | length > 0
+      tags: [dns-category]
+
+    - name: Verify DNS configuration
+      shell: |
+        echo "=== Global Nameservers ==="
+        cmsh -c "base; get nameservers"
+        echo ""
+        echo "=== Network Domain ==="
+        cmsh -c "network; use {{ bcm_internal_network }}; get domainname"
+      register: dns_verify
+
+    - name: Display DNS verification
+      debug:
+        msg: "{{ dns_verify.stdout }}"
+
+    - name: Test DNS resolution from head node
+      shell: |
+        echo "=== resolv.conf ==="
+        cat /etc/resolv.conf
+        echo ""
+        echo "=== DNS test ==="
+        nslookup $(hostname) 2>/dev/null || echo "nslookup not available"
+      register: dns_test
+      tags: [dns-test]
+
+    - name: Display DNS test results
+      debug:
+        msg: "{{ dns_test.stdout }}"
+      tags: [dns-test]

@@ -1,0 +1,67 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Node Reboot — Graceful reboot with optional Slurm drain
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   ansible-playbook playbooks/node_reboot.yml \
+#       -e "targets=['cpu-n01']" -e "drain_first=true"
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Node Reboot"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    drain_first: "{{ drain | default(true) | bool }}"
+    drain_reason: "reboot-maintenance"
+
+  tasks:
+    - name: "Validate targets"
+      ansible.builtin.assert:
+        that: target_nodes | length > 0
+        fail_msg: "No targets specified."
+
+    - name: "Drain nodes from Slurm"
+      ansible.builtin.shell: |
+        scontrol update NodeName={{ item }} State=DRAIN Reason="{{ drain_reason }}" 2>/dev/null || true
+      loop: "{{ target_nodes }}"
+      when: drain_first
+
+    - name: "Wait for running jobs to complete"
+      ansible.builtin.shell: |
+        squeue -w {{ item }} -h 2>/dev/null | wc -l
+      loop: "{{ target_nodes }}"
+      register: job_check
+      until: job_check.stdout | int == 0
+      retries: 30
+      delay: 10
+      when: drain_first
+      failed_when: false
+
+    - name: "Reboot nodes via cmsh"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; power reset" 2>&1
+      loop: "{{ target_nodes }}"
+      register: reboot_result
+      failed_when: false
+
+    - name: "Wait for nodes to come back"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get status" | tail -1
+      loop: "{{ target_nodes }}"
+      register: status_check
+      until: "'UP' in status_check.stdout | default('')"
+      retries: 30
+      delay: 30
+      failed_when: false
+
+    - name: "Resume nodes in Slurm"
+      ansible.builtin.shell: |
+        scontrol update NodeName={{ item }} State=RESUME 2>/dev/null || true
+      loop: "{{ target_nodes }}"
+      when: drain_first
+
+    - name: "Reboot complete"
+      ansible.builtin.debug:
+        msg: "Rebooted: {{ target_nodes | join(', ') }}"

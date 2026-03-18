@@ -1,0 +1,106 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Fleet Validation — Multi-Node NCCL Suite
+# ═══════════════════════════════════════════════════════════════════
+# Multi-node NCCL tests via MPI across node pairs.
+# Tests NVLink + InfiniBand fabric integrity.
+# ~1 hour per node pair.
+
+name: nccl-multinode
+description: "Multi-node NCCL via MPI — fabric and interconnect validation"
+estimated_duration_minutes: 60
+sku_profiles: [h200, b200]
+schedule: "weekly"
+stop_on_first_failure: false
+multinode: true
+nodes_per_test: 2
+
+tests:
+  - name: nccl_allreduce_multinode
+    description: "AllReduce across 2 nodes via MPI — primary bandwidth test"
+    command: >-
+      mpirun --allow-run-as-root
+      -mca pml ucx -mca coll ^hcoll -mca btl ^openib,smcuda
+      --bind-to none
+      --hostfile ${HOSTFILE}
+      -np ${TOTAL_PROCS}
+      --npernode ${GPU_COUNT}
+      --report-bindings
+      -x LD_LIBRARY_PATH -x PATH
+      -x NCCL_DEBUG=INFO
+      -x NCCL_IB_HCA=mlx5
+      -x NCCL_NET_DEVICES=${NCCL_IB_DEVICES}
+      -x UCX_NET_DEVICES=${UCX_DEVICE}
+      -x NCCL_IB_SPLIT_DATA_ON_QPS=0
+      -x NCCL_IB_GDR_PEER_CONNECTION=1
+      -x CUDA_MODULE_LOADING=EAGER
+      -x NCCL_SOCKET_IFNAME=bond0
+      -x NCCL_IB_DISABLE=0
+      ${NCCL_TESTS_PATH}/all_reduce_perf
+      -b 8 -e 8G -f 2 -g 1 -c 0
+    timeout_seconds: 3600
+    pass_criteria:
+      type: bandwidth_gte
+      field: "busbw"
+      threshold_key: "nccl_multinode_allreduce_min_busbw_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nccl_multinode_allreduce_busbw_gbps
+        type: gauge
+        extract: "busbw"
+
+  - name: nccl_allgather_multinode
+    description: "AllGather across 2 nodes via MPI"
+    command: >-
+      mpirun --allow-run-as-root
+      -mca pml ucx -mca coll ^hcoll -mca btl ^openib,smcuda
+      --bind-to none
+      --hostfile ${HOSTFILE}
+      -np ${TOTAL_PROCS}
+      --npernode ${GPU_COUNT}
+      -x LD_LIBRARY_PATH -x PATH
+      -x NCCL_DEBUG=INFO
+      -x NCCL_IB_HCA=mlx5
+      -x NCCL_NET_DEVICES=${NCCL_IB_DEVICES}
+      -x UCX_NET_DEVICES=${UCX_DEVICE}
+      -x NCCL_SOCKET_IFNAME=bond0
+      ${NCCL_TESTS_PATH}/all_gather_perf
+      -b 8 -e 8G -f 2 -g 1 -c 0
+    timeout_seconds: 3600
+    pass_criteria:
+      type: bandwidth_gte
+      field: "busbw"
+      threshold_key: "nccl_multinode_allgather_min_busbw_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nccl_multinode_allgather_busbw_gbps
+        type: gauge
+        extract: "busbw"
+
+  - name: nccl_reducescatter_multinode
+    description: "ReduceScatter across 2 nodes via MPI"
+    command: >-
+      mpirun --allow-run-as-root
+      -mca pml ucx -mca coll ^hcoll -mca btl ^openib,smcuda
+      --bind-to none
+      --hostfile ${HOSTFILE}
+      -np ${TOTAL_PROCS}
+      --npernode ${GPU_COUNT}
+      -x LD_LIBRARY_PATH -x PATH
+      -x NCCL_DEBUG=INFO
+      -x NCCL_IB_HCA=mlx5
+      -x NCCL_NET_DEVICES=${NCCL_IB_DEVICES}
+      -x UCX_NET_DEVICES=${UCX_DEVICE}
+      -x NCCL_SOCKET_IFNAME=bond0
+      ${NCCL_TESTS_PATH}/reduce_scatter_perf
+      -b 8 -e 8G -f 2 -g 1 -c 0
+    timeout_seconds: 3600
+    pass_criteria:
+      type: bandwidth_gte
+      field: "busbw"
+      threshold_key: "nccl_multinode_reducescatter_min_busbw_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nccl_multinode_reducescatter_busbw_gbps
+        type: gauge
+        extract: "busbw"

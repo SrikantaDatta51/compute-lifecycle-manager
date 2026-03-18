@@ -1,0 +1,35 @@
+# ═══════════════════════════════════════════════════════════════════════
+# RSyslog Filter — MLX5 Kernel Noise Suppression
+# ═══════════════════════════════════════════════════════════════════════
+# Deployed by Ansible (bcm-iac/roles/rsyslog-silence)
+#
+# Problem:  mlx5 driver produces ACCESS_REG(0x805) errors every ~30s
+#           on all DGX nodes, flooding syslog and dmesg.
+# Fix:      DGX OS 7.4.0 (https://docs.nvidia.com/dgx/dgx-os-7-user-guide/
+#           resolved-issues.html#access-reg-command-failure-with-err-22)
+# Workaround: This RSyslog filter (recommended by NVIDIA Support)
+#
+# Generated: {{ ansible_date_time.iso8601 | default('N/A') }}
+# Host:      {{ inventory_hostname }}
+# Mode:      {{ rsyslog_filter_mode }}
+# ═══════════════════════════════════════════════════════════════════════
+
+{% if rsyslog_filter_mode == "route" %}
+# ── Route matching messages to separate log file ──────────────────────
+# Messages are saved to {{ rsyslog_noise_log_path }} then stopped from
+# reaching /var/log/syslog. Useful for audit trail.
+{% for item in rsyslog_filter_patterns %}
+# {{ item.description }}
+:msg, contains, "{{ item.pattern }}" {{ rsyslog_noise_log_path }}
+{% endfor %}
+{% for item in rsyslog_filter_patterns %}
+:msg, contains, "{{ item.pattern }}" stop
+{% endfor %}
+{% else %}
+# ── Drop matching messages entirely ──────────────────────────────────
+# Messages are silently discarded. No disk I/O for these patterns.
+{% for item in rsyslog_filter_patterns %}
+# {{ item.description }}
+:msg, contains, "{{ item.pattern }}" stop
+{% endfor %}
+{% endif %}

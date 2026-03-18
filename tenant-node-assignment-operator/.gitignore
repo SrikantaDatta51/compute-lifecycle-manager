@@ -1,0 +1,9 @@
+.idea/
+.vscode/
+bin/
+coverage.out
+coverage.html
+*.exe
+*.test
+*.prof
+bin/

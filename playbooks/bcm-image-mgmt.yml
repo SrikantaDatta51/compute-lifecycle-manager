@@ -1,0 +1,86 @@
+---
+- name: BCM Image and Category Management
+  hosts: headnode
+  gather_facts: no
+  tasks:
+    # --- Software Images ---
+    - name: List software images
+      command: cmsh -c 'softwareimage list'
+      register: images
+      tags: [images]
+
+    - name: Show default-image details
+      command: cmsh -c 'softwareimage; use default-image; show'
+      register: image_detail
+      tags: [images]
+
+    # --- Categories ---
+    - name: List categories
+      command: cmsh -c 'category list'
+      register: categories
+      tags: [categories]
+
+    - name: Show default category details
+      command: cmsh -c 'category; use default; show'
+      register: cat_detail
+      tags: [categories]
+
+    # --- Configuration Overlays ---
+    - name: List overlays
+      command: cmsh -c 'configurationoverlay list'
+      register: overlays
+      tags: [overlays]
+
+    - name: Show slurm-client overlay
+      command: cmsh -c 'configurationoverlay; use slurm-client; show'
+      register: slurm_client
+      tags: [overlays]
+
+    - name: Show slurm-server overlay
+      command: cmsh -c 'configurationoverlay; use slurm-server; show'
+      register: slurm_server
+      tags: [overlays]
+
+    # --- Networks ---
+    - name: List networks
+      command: cmsh -c 'network list'
+      register: networks
+      tags: [networks]
+
+    - name: Show internalnet details
+      command: cmsh -c 'network; use internalnet; show'
+      register: internal_net
+      tags: [networks]
+
+    # --- Partitions ---
+    - name: List partitions
+      command: cmsh -c 'partition list'
+      register: partitions
+      tags: [partitions]
+
+    - name: Show base partition details
+      command: cmsh -c 'partition; use base; show'
+      register: base_part
+      tags: [partitions]
+
+    # --- Report ---
+    - name: Display BCM Configuration Report
+      debug:
+        msg: |
+          ======= BCM CONFIGURATION REPORT =======
+
+          === SOFTWARE IMAGES ===
+          {{ images.stdout }}
+
+          === CATEGORIES ===
+          {{ categories.stdout }}
+
+          === OVERLAYS ===
+          {{ overlays.stdout }}
+
+          === NETWORKS ===
+          {{ networks.stdout }}
+
+          === PARTITIONS ===
+          {{ partitions.stdout }}
+      tags: [always]

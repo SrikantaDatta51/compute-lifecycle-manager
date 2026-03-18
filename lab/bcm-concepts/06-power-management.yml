@@ -1,0 +1,88 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 06 — Power Management
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - BCM can power on/off/reset nodes via cmsh
+#   - Uses IPMI/BMC under the hood
+#   - Power commands: power on, power off, power reset, power status
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 06 — Power Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: Power management via cmsh"
+      ansible.builtin.debug:
+        msg: |
+          ── Power Management ──
+          BCM talks to each node's BMC (IPMI) to control power.
+          
+          Commands:
+            power status  — Check if node is ON/OFF
+            power on      — Turn on the node
+            power off     — Turn off the node  
+            power reset   — Hard reboot (like pressing the reset button)
+
+    - name: "ACTION: Check power status of all nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; power status"
+      loop: "{{ all_nodes }}"
+      register: power_status
+      changed_when: false
+
+    - name: "OUTPUT: Power state"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout | trim }}"
+      loop: "{{ power_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "ACTION: Power off cpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; power off"
+      register: power_off
+
+    - name: "OUTPUT: Powered off"
+      ansible.builtin.debug:
+        msg: "{{ power_off.stdout }}"
+
+    - name: "ACTION: Verify node is DOWN and power is OFF"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; list"
+      register: after_off
+      changed_when: false
+
+    - name: "OUTPUT: cpu-n01 is DOWN"
+      ansible.builtin.debug:
+        msg: "{{ after_off.stdout_lines }}"
+
+    - name: "ACTION: Power on cpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; power on"
+      register: power_on
+
+    - name: "OUTPUT: Powered on"
+      ansible.builtin.debug:
+        msg: "{{ power_on.stdout }}"
+
+    - name: "ACTION: Final device list"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'device; list'"
+      register: final
+      changed_when: false
+
+    - name: "OUTPUT: All nodes UP"
+      ansible.builtin.debug:
+        msg: "{{ final.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 06 Complete ═══
+          ✅ Checked power status: power status
+          ✅ Powered off: power off (node goes DOWN)
+          ✅ Powered on: power on (node comes UP)
+          
+          KEY: Power off changes BOTH power state and BCM status.
+          
+          NEXT: Lab 07 — Slurm Workload Manager

@@ -1,0 +1,38 @@
+---
+# BCM Health Check Role
+# Checks critical services, disk, memory, and Slurm status
+
+- name: Check critical services
+  shell: "systemctl is-active {{ item }}"
+  loop: "{{ health_check_services }}"
+  register: svc_check
+  failed_when: false
+
+- name: Report service status
+  debug:
+    msg: "{{ item.item }}: {{ item.stdout | default('unknown') }}"
+  loop: "{{ svc_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check disk usage
+  shell: df -h / /cm/images 2>/dev/null | tail -n +2
+  register: disk
+
+- name: Check memory
+  shell: free -h | head -2
+  register: mem
+
+- name: Check Slurm status
+  shell: sinfo 2>/dev/null || echo "Slurm not available"
+  register: slurm
+
+- name: Report cluster state
+  debug:
+    msg: |
+      === Disk ===
+      {{ disk.stdout }}
+      === Memory ===
+      {{ mem.stdout }}
+      === Slurm ===
+      {{ slurm.stdout }}

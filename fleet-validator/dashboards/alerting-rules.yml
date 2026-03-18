@@ -1,0 +1,97 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Fleet Validation Framework — Prometheus Alerting Rules
+# ═══════════════════════════════════════════════════════════════════
+# Import these into Prometheus or Alertmanager.
+
+groups:
+  - name: fleet_validation
+    interval: 60s
+    rules:
+
+      # ── Node failed certification ──
+      - alert: FleetCertificationFailed
+        expr: fleet_cert_node_certified == 0
+        for: 5m
+        labels:
+          severity: warning
+          team: fleet-ops
+        annotations:
+          summary: "Node {{ $labels.node }} failed fleet certification"
+          description: >-
+            Node {{ $labels.node }} did not pass the {{ $labels.suite }}
+            certification suite. Check fleet-validator logs for details.
+          runbook_url: "https://wiki.internal/fleet-validation/failed-cert"
+
+      # ── Hardware failure (RMA required) ──
+      - alert: FleetNodeHardwareFailure
+        expr: fleet_cert_node_failure_class == 2
+        for: 1m
+        labels:
+          severity: critical
+          team: fleet-ops
+        annotations:
+          summary: "HARDWARE FAILURE: Node {{ $labels.node }} requires RMA"
+          description: >-
+            Node {{ $labels.node }} has a hardware-level failure detected
+            by the fleet validation framework. The node has been drained
+            and marked for RMA.
+          runbook_url: "https://wiki.internal/fleet-validation/rma"
+
+      # ── Software issue (maintenance) ──
+      - alert: FleetNodeSoftwareIssue
+        expr: fleet_cert_node_failure_class == 1
+        for: 5m
+        labels:
+          severity: warning
+          team: fleet-ops
+        annotations:
+          summary: "SOFTWARE ISSUE: Node {{ $labels.node }} in maintenance"
+          description: >-
+            Node {{ $labels.node }} has a software-level issue detected
+            by the fleet validation framework. The node has been drained
+            for maintenance.
+          runbook_url: "https://wiki.internal/fleet-validation/maintenance"
+
+      # ── Certification stale (>48h since last run) ──
+      - alert: FleetCertificationStale
+        expr: (time() - fleet_cert_last_certified_timestamp) > 172800
+        for: 1h
+        labels:
+          severity: warning
+          team: fleet-ops
+        annotations:
+          summary: "Node {{ $labels.node }} certification is stale (>48h)"
+          description: >-
+            Node {{ $labels.node }} has not been certified in over 48 hours.
+            The daily certification may not be running. Check the
+            fleet-validator systemd timer.
+          runbook_url: "https://wiki.internal/fleet-validation/stale"
+
+      # ── Pass rate below threshold ──
+      - alert: FleetCertPassRateLow
+        expr: fleet_cert_pass_rate < 90
+        for: 10m
+        labels:
+          severity: critical
+          team: fleet-ops
+        annotations:
+          summary: "Fleet certification pass rate below 90%"
+          description: >-
+            The fleet certification pass rate is {{ $value }}%.
+            Multiple nodes may have issues. Investigate immediately.
+          runbook_url: "https://wiki.internal/fleet-validation/low-pass-rate"
+
+      # ── NCCL bandwidth degradation ──
+      - alert: FleetNCCLBandwidthLow
+        expr: fleet_cert_test_metric{test=~"nccl_.*"} < 100
+        for: 5m
+        labels:
+          severity: warning
+          team: fleet-ops
+        annotations:
+          summary: "NCCL bandwidth degraded on {{ $labels.node }}"
+          description: >-
+            NCCL {{ $labels.test }} on {{ $labels.node }} is {{ $value }} GB/s,
+            which is below expected thresholds. May indicate NVLink or
+            InfiniBand issues.

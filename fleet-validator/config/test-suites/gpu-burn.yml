@@ -1,0 +1,128 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Fleet Validation — GPU Burn Suite
+# ═══════════════════════════════════════════════════════════════════
+# GPU-focused stress testing. All 8 GPUs under maximum load.
+# ~2 hours per node.
+
+name: gpu-burn
+description: "GPU-focused stress tests — thermal, ECC, memory, compute"
+estimated_duration_minutes: 120
+sku_profiles: [h200, b200]
+schedule: "weekly"
+stop_on_first_failure: false
+
+tests:
+  - name: dcgmi_r3
+    description: "DCGMI Level 3 — extended stress, PCIe, memory bandwidth"
+    command: "dcgmi diag -r 3"
+    timeout_seconds: 1200
+    pass_criteria:
+      type: grep_absent
+      pattern: "FAIL"
+    failure_class: hardware
+    metrics:
+      - name: dcgmi_r3_passed
+        type: gauge
+        extract: "exit_code"
+
+  - name: dcgmi_r4
+    description: "DCGMI Level 4 — full system incl. NVLink/NVSwitch/ECC"
+    command: "dcgmi diag -r 4"
+    timeout_seconds: 7200
+    pass_criteria:
+      type: grep_absent
+      pattern: "FAIL"
+    failure_class: hardware
+    metrics:
+      - name: dcgmi_r4_passed
+        type: gauge
+        extract: "exit_code"
+
+  - name: gpu_burn_60s
+    description: "gpu-burn 60 seconds — sustained FP64 compute stress"
+    command: >-
+      docker run --rm --gpus all
+      ghcr.io/wilicc/gpu-burn:latest 60
+    timeout_seconds: 300
+    pass_criteria:
+      type: grep_absent
+      pattern: "FAULTY"
+    failure_class: hardware
+    metrics:
+      - name: gpu_burn_passed
+        type: gauge
+        extract: "exit_code"
+      - name: gpu_burn_gflops
+        type: gauge
+        extract: "gflops_pattern"
+
+  - name: nvbandwidth_h2d
+    description: "Host-to-Device memory copy bandwidth"
+    command: "nvbandwidth -t host_to_device_memcpy_ce"
+    timeout_seconds: 300
+    pass_criteria:
+      type: bandwidth_gte
+      field: "bandwidth"
+      threshold_key: "nvbw_h2d_min_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nvbandwidth_h2d_gbps
+        type: gauge
+        extract: "bandwidth"
+
+  - name: nvbandwidth_d2d
+    description: "Device-to-Device copy bandwidth"
+    command: "nvbandwidth -t device_to_device_memcpy_read_ce"
+    timeout_seconds: 300
+    pass_criteria:
+      type: bandwidth_gte
+      field: "bandwidth"
+      threshold_key: "nvbw_d2d_min_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nvbandwidth_d2d_gbps
+        type: gauge
+        extract: "bandwidth"
+
+  - name: nvbandwidth_bidir
+    description: "Bidirectional Device-to-Device bandwidth"
+    command: "nvbandwidth -t device_to_device_bidirectional_memcpy_read_ce"
+    timeout_seconds: 300
+    pass_criteria:
+      type: bandwidth_gte
+      field: "bandwidth"
+      threshold_key: "nvbw_bidir_min_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nvbandwidth_bidir_gbps
+        type: gauge
+        extract: "bandwidth"
+
+  - name: nvbandwidth_all_to_one
+    description: "All-to-One write bandwidth"
+    command: "nvbandwidth -t all_to_one_write_ce"
+    timeout_seconds: 300
+    pass_criteria:
+      type: bandwidth_gte
+      field: "bandwidth"
+      threshold_key: "nvbw_all_to_one_min_gbps"
+    failure_class: hardware
+    metrics:
+      - name: nvbandwidth_all_to_one_gbps
+        type: gauge
+        extract: "bandwidth"
+
+  - name: ecc_post_stress
+    description: "Post-stress ECC error check"
+    command: "nvidia-smi -q -d ECC | grep -A2 'Volatile' | grep 'Uncorrectable'"
+    timeout_seconds: 60
+    pass_criteria:
+      type: field_equals
+      field_pattern: "Uncorrectable.*:\\s+(\\d+)"
+      expected: "0"
+    failure_class: hardware
+    metrics:
+      - name: ecc_uncorrectable_post_stress
+        type: gauge
+        extract: "field_pattern"

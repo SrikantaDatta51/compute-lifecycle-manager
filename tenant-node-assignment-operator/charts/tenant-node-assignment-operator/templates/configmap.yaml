@@ -1,0 +1,13 @@
+# Operator runtime configuration — generated from Helm values
+# This ConfigMap drives ALL operator behavior via the workflow engine.
+# Change the workflow steps to support different use cases without code changes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tenant-node-assignment-operator.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tenant-node-assignment-operator.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- .Values.operatorConfig | toYaml | nindent 4 }}

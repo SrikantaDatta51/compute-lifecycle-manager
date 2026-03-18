@@ -1,0 +1,52 @@
+---
+env_name: az2-bmaas-prod
+env_description: "AZ2 BMaaS Production — 66 DGX B200 Nodes"
+
+bcm_version: "11.0"
+bcm_head_ssh_ip: "10.20.100.1"
+bcm_head_ip: "10.20.200.254"
+bcm_internal_network: "internalnet"
+bcm_external_network: "externalnet"
+bcm_domain: "bmaas.prod.corp.internal"
+
+dns_nameservers:
+  - "10.20.200.254"
+  - "10.0.0.53"
+  - "10.0.0.54"
+dns_search_domains:
+  - "bmaas.prod.corp.internal"
+  - "corp.internal"
+
+ntp_servers:
+  - "ntp1.corp.internal"
+  - "ntp2.corp.internal"
+
+# 66 DGX B200 nodes — generated dynamically
+b200_node_count: 66
+b200_node_prefix: "dgx-b200"
+b200_ip_base: "10.20.200"
+b200_ip_start: 1
+# Generate host map: { "dgx-b200-001": { "ansible_host": "10.20.200.1" }, ... }
+b200_host_map: >-
+  {{ dict(
+    (range(b200_ip_start, b200_ip_start + b200_node_count) | map('regex_replace', '^(.*)$', b200_node_prefix ~ '-' ~ '%03d' | format(_)) | list),
+    (range(b200_ip_start, b200_ip_start + b200_node_count) | map('regex_replace', '^(.*)$', {'ansible_host': b200_ip_base ~ '.' ~ _}) | list)
+  ) }}
+
+bcm_categories:
+  - name: dgx-b200
+    image: ubuntu24-dgx-b200
+    kernel_params: "iommu=pt intel_iommu=on nvidia.NVreg_EnableGpuFirmware=0"
+    node_range: "dgx-b200-[001-066]"
+
+slurm_partition: "production"
+slurm_default_partition: true
+bcm_image: "ubuntu24-dgx-b200"
+
+enable_health_checks: true
+health_check_services: [cmd, slurmctld, slurmdbd, dhcpd, prometheus-node-exporter]
+
+# Production-specific settings
+max_concurrent_provisions: 10
+health_check_interval: 300
+alert_on_node_down: true

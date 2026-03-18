@@ -1,0 +1,94 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 12 — Debug Bundle Collection
+# ═══════════════════════════════════════════════════════════════════
+- name: "BCM Lab 12 — Debug Bundle Collection"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    ticket_id: "LAB-12-DEBUG"
+    bundle_dir: "/tmp/bcm-lab-state/debug-bundles"
+  tasks:
+    - name: "CONCEPT: Debug Bundles"
+      ansible.builtin.debug:
+        msg: |
+          ── Debug Bundles ──
+          When something goes wrong, you need diagnostic data.
+          A debug bundle collects EVERYTHING needed for troubleshooting:
+            - GPU info (nvidia-smi, dcgmi)
+            - InfiniBand (ibstat, ibdiagnet)
+            - NVSM dump (BMC, BIOS, PSU, fans)
+            - System logs (dmesg, journalctl)
+            - Firmware versions
+          
+          All data is tar'd and can be uploaded to S3 for NVIDIA support.
+
+    - name: "ACTION: Create bundle directory"
+      ansible.builtin.file:
+        path: "{{ bundle_dir }}/{{ ticket_id }}"
+        state: directory
+        mode: "0755"
+
+    - name: "ACTION: Collect GPU diagnostics from gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvidia-smi -q 2>/dev/null || echo nvidia-smi-output'" > {{ bundle_dir }}/{{ ticket_id }}/nvidia-smi.txt
+      register: gpu_diag
+
+    - name: "ACTION: Collect NVSM dump from gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvsm dump'" > {{ bundle_dir }}/{{ ticket_id }}/nvsm-dump.txt
+      register: nvsm_diag
+
+    - name: "ACTION: Collect system info from gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec '{{ item.cmd }}'" > {{ bundle_dir }}/{{ ticket_id }}/{{ item.name }}.txt
+      loop:
+        - { name: uptime, cmd: "uptime" }
+        - { name: free, cmd: "free -h" }
+        - { name: df, cmd: "df -h" }
+        - { name: dmesg, cmd: "dmesg | tail -50 2>/dev/null || echo no-dmesg" }
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "ACTION: List collected files"
+      ansible.builtin.shell: "ls -la {{ bundle_dir }}/{{ ticket_id }}/"
+      register: bundle_files
+      changed_when: false
+
+    - name: "OUTPUT: Bundle contents"
+      ansible.builtin.debug:
+        msg: "{{ bundle_files.stdout_lines }}"
+
+    - name: "ACTION: Create tarball"
+      ansible.builtin.shell: |
+        cd {{ bundle_dir }}
+        tar czf {{ ticket_id }}.tar.gz {{ ticket_id }}/
+        ls -lh {{ ticket_id }}.tar.gz
+      register: tarball
+
+    - name: "OUTPUT: Bundle ready"
+      ansible.builtin.debug:
+        msg: |
+          ═══ DEBUG BUNDLE READY ═══
+          {{ tarball.stdout }}
+          Ticket:  {{ ticket_id }}
+          Path:    {{ bundle_dir }}/{{ ticket_id }}.tar.gz
+
+    - name: "ACTION: Show what's inside the bundle"
+      ansible.builtin.shell: "tar tzf {{ bundle_dir }}/{{ ticket_id }}.tar.gz"
+      register: tar_contents
+      changed_when: false
+
+    - name: "OUTPUT: Tar contents"
+      ansible.builtin.debug:
+        msg: "{{ tar_contents.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 12 Complete ═══
+          ✅ Collected GPU diag, NVSM dump, system info
+          ✅ Created tarball: {{ ticket_id }}.tar.gz
+          ✅ Verified bundle contents
+          
+          NEXT: Lab 13 — Cordon / Uncordon Workflow

@@ -1,0 +1,16 @@
+[Unit]
+Description=Fleet Validation Framework — Daily Timer
+Documentation=https://github.com/your-org/bcm-iac/tree/main/fleet-validator
+
+[Timer]
+# Run daily at 02:00 UTC (off-peak window)
+OnCalendar=*-*-* 02:00:00
+# Add random delay up to 15 min to avoid thundering herd
+RandomizedDelaySec=900
+# Run immediately if last run was missed (e.g., node was down)
+Persistent=true
+# Accuracy — don't need sub-second precision
+AccuracySec=60
+
+[Install]
+WantedBy=timers.target

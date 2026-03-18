@@ -1,0 +1,96 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Debug Bundle — Collect System Diagnostics from Nodes
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   ansible-playbook playbooks/debug_bundle.yml \
+#       -e "targets=['cpu-n01']" -e "ticket_id=INC-12345"
+#
+#   # Collect specific categories
+#   ansible-playbook playbooks/debug_bundle.yml \
+#       -e "targets=['cpu-n01']" -e "categories=['system','bcm']"
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Debug Bundle Collection"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else all_nodes }}"
+    ticket_id: "{{ parameters.ticket_id | default('DEBUG') }}"
+    categories: "{{ cats | default(['system', 'services', 'bcm']) }}"
+
+  tasks:
+    - name: "Log bundle collection start"
+      ansible.builtin.debug:
+        msg: |
+          ═══ DEBUG BUNDLE COLLECTION ═══
+          Nodes:      {{ target_nodes | join(', ') }}
+          Categories: {{ categories | join(', ') }}
+          Ticket:     {{ ticket_id }}
+          Timestamp:  {{ ansible_date_time.iso8601 | default('now') }}
+
+    - name: "Create debug bundle directory"
+      ansible.builtin.file:
+        path: "{{ debug_bundle_dir }}/{{ ticket_id }}/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop: "{{ target_nodes }}"
+
+    # ── Head Node Diagnostics ──
+    - name: "Collect head node diagnostics"
+      ansible.builtin.shell: |
+        OUTDIR="{{ debug_bundle_dir }}/{{ ticket_id }}/headnode"
+        mkdir -p "$OUTDIR"
+        {{ item.cmd }} > "$OUTDIR/{{ item.name }}.txt" 2>&1 || true
+      loop: "{{ debug_commands[cat] | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        cat: "{{ categories | first }}"
+      when: "'system' in categories or 'bcm' in categories"
+      changed_when: false
+
+    # ── Per-Node Diagnostics via cmsh ──
+    - name: "Collect node diagnostics via cmsh exec"
+      ansible.builtin.shell: |
+        NODE="{{ item.0 }}"
+        CMD_NAME="{{ item.1.name }}"
+        OUTDIR="{{ debug_bundle_dir }}/{{ ticket_id }}/$NODE"
+        mkdir -p "$OUTDIR"
+
+        {{ cmsh_bin }} -c "device; use $NODE; exec '{{ item.1.cmd }}'" \
+          > "$OUTDIR/$CMD_NAME.txt" 2>&1 || \
+          echo "Command failed or node unreachable" > "$OUTDIR/$CMD_NAME.txt"
+      loop: "{{ target_nodes | product(debug_commands['system'] | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0 }}:{{ item.1.name }}"
+      when: "'system' in categories"
+      changed_when: false
+      failed_when: false
+
+    # ── BCM-Level Diagnostics ──
+    - name: "Collect BCM diagnostics"
+      ansible.builtin.shell: |
+        OUTDIR="{{ debug_bundle_dir }}/{{ ticket_id }}/bcm"
+        mkdir -p "$OUTDIR"
+        {{ item.cmd }} > "$OUTDIR/{{ item.name }}.txt" 2>&1 || true
+      loop: "{{ debug_commands['bcm'] | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: "'bcm' in categories"
+      changed_when: false
+
+    # ── Create tar archive ──
+    - name: "Create debug bundle archive"
+      ansible.builtin.shell: |
+        cd {{ debug_bundle_dir }}
+        tar -czf {{ ticket_id }}.tar.gz {{ ticket_id }}/
+        echo "Bundle: {{ debug_bundle_dir }}/{{ ticket_id }}.tar.gz"
+        ls -lh {{ ticket_id }}.tar.gz
+      register: archive_result
+      changed_when: false
+
+    - name: "Bundle archive location"
+      ansible.builtin.debug:
+        msg: "{{ archive_result.stdout_lines }}"

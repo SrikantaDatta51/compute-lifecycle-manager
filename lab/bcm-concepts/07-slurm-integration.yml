@@ -1,0 +1,143 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 07 — Slurm Workload Manager
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - BCM integrates Slurm for job scheduling
+#   - BCM manages Slurm partitions via cmsh partition mode
+#   - sinfo shows partition/node state
+#   - scontrol manages nodes (drain/resume)
+#   - sbatch submits jobs, squeue shows queue
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 07 — Slurm Workload Manager"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: BCM + Slurm integration"
+      ansible.builtin.debug:
+        msg: |
+          ── BCM manages Slurm ──
+          BCM doesn't replace Slurm — it manages Slurm for you.
+          
+          BCM creates Slurm partitions via cmsh:
+            cmsh partition; list
+          
+          Standard Slurm tools still work:
+            sinfo    — show partition/node state
+            squeue   — show job queue
+            sbatch   — submit a job
+            scontrol — manage nodes (drain/resume)
+
+    - name: "ACTION: Show BCM partitions"
+      ansible.builtin.shell: "{{ cmsh_bin }} -c 'partition; list'"
+      register: partitions
+      changed_when: false
+
+    - name: "OUTPUT: BCM partitions"
+      ansible.builtin.debug:
+        msg: "{{ partitions.stdout_lines }}"
+
+    - name: "ACTION: Show Slurm partition info via sinfo"
+      ansible.builtin.shell: sinfo -l
+      register: slurm_info
+      changed_when: false
+
+    - name: "OUTPUT: Slurm sinfo"
+      ansible.builtin.debug:
+        msg: "{{ slurm_info.stdout_lines }}"
+
+    - name: "CONCEPT: Draining nodes for maintenance"
+      ansible.builtin.debug:
+        msg: |
+          ── Drain / Resume ──
+          Before maintenance, drain the node:
+            scontrol update NodeName=cpu-n01 State=DRAIN Reason="maintenance"
+          
+          This tells Slurm: don't give this node any new jobs.
+          Running jobs continue until they finish.
+          
+          After maintenance, resume:
+            scontrol update NodeName=cpu-n01 State=RESUME
+
+    - name: "ACTION: Drain cpu-n01 for maintenance"
+      ansible.builtin.shell: |
+        scontrol update NodeName=cpu-n01 State=DRAIN Reason="lab-maintenance"
+      register: drain_result
+
+    - name: "OUTPUT: Node drained"
+      ansible.builtin.debug:
+        msg: "{{ drain_result.stdout }}"
+
+    - name: "ACTION: Verify drain state with sinfo"
+      ansible.builtin.shell: sinfo -l
+      register: after_drain
+      changed_when: false
+
+    - name: "OUTPUT: cpu-n01 shows 'drained'"
+      ansible.builtin.debug:
+        msg: "{{ after_drain.stdout_lines }}"
+
+    - name: "ACTION: Resume cpu-n01"
+      ansible.builtin.shell: |
+        scontrol update NodeName=cpu-n01 State=RESUME
+
+    - name: "ACTION: Verify resumed"
+      ansible.builtin.shell: sinfo -l
+      register: after_resume
+      changed_when: false
+
+    - name: "OUTPUT: cpu-n01 back to idle"
+      ansible.builtin.debug:
+        msg: "{{ after_resume.stdout_lines }}"
+
+    - name: "CONCEPT: Submitting a job"
+      ansible.builtin.debug:
+        msg: |
+          ── Job Submission ──
+          Users submit jobs with sbatch:
+            sbatch my_job.sh
+          
+          Slurm allocates a node and runs the script.
+          Job output goes to slurm-<jobid>.out
+
+    - name: "ACTION: Create a test job script"
+      ansible.builtin.copy:
+        dest: /tmp/test-job.sh
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          echo "Job $SLURM_JOB_ID running on $SLURM_NODELIST"
+          echo "CPUs: $SLURM_CPUS_ON_NODE"
+          hostname
+          echo "Hello from BCM Lab!"
+
+    - name: "ACTION: Submit the job"
+      ansible.builtin.shell: sbatch /tmp/test-job.sh
+      register: job_submit
+
+    - name: "OUTPUT: Job submitted"
+      ansible.builtin.debug:
+        msg: "{{ job_submit.stdout }}"
+
+    - name: "ACTION: Check job queue"
+      ansible.builtin.shell: squeue -l
+      register: queue
+      changed_when: false
+
+    - name: "OUTPUT: Job queue"
+      ansible.builtin.debug:
+        msg: "{{ queue.stdout_lines }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 07 Complete ═══
+          ✅ Listed BCM partitions → Slurm partitions
+          ✅ Used sinfo to view partition state
+          ✅ Drained cpu-n01 → verified in sinfo → resumed
+          ✅ Submitted a job with sbatch → saw it in squeue
+          
+          KEY: BCM manages Slurm config, but you still use sinfo/scontrol/sbatch.
+          
+          NEXT: Lab 08 — Remote Execution (cmsh exec)

@@ -1,0 +1,107 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 01 — Device Management
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - Devices are the fundamental unit in BCM
+#   - Each physical/virtual node is a "device"
+#   - Devices have: name, IP, MAC, status, category, image profile
+#   - cmsh "device" mode lets you list, inspect, and modify devices
+#
+# COMMANDS DEMONSTRATED:
+#   cmsh -c "device; list"
+#   cmsh -c "device; use <node>; show"
+#   cmsh -c "device; use <node>; get status"
+#   cmsh -c "device; use <node>; get bmcipaddress"
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 01 — Device Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+
+  tasks:
+    - name: "CONCEPT: List all devices in the cluster"
+      ansible.builtin.debug:
+        msg: |
+          ── What is a Device? ──
+          In BCM, every managed node (physical server, VM, etc.) is a "device".
+          The head node manages all devices through cmsh.
+          Let's list all devices in our cluster...
+
+    - name: "ACTION: cmsh device list"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; list"
+      register: device_list
+      changed_when: false
+
+    - name: "OUTPUT: All cluster devices"
+      ansible.builtin.debug:
+        msg: "{{ device_list.stdout_lines }}"
+
+    - name: "CONCEPT: Inspect a specific device"
+      ansible.builtin.debug:
+        msg: |
+          ── Device Properties ──
+          Each device has properties you can read with 'show' or 'get <property>':
+            - status:        UP, CLOSED, DOWN, INSTALL
+            - ip:            Management network IP
+            - mac:           Network MAC address
+            - category:      Which category this node belongs to
+            - imageprofile:   Which OS image is deployed
+            - bmcipaddress:  BMC/IPMI out-of-band IP
+
+    - name: "ACTION: Show full device properties for cpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use cpu-n01; show"
+      register: device_show
+      changed_when: false
+
+    - name: "OUTPUT: cpu-n01 properties"
+      ansible.builtin.debug:
+        msg: "{{ device_show.stdout_lines }}"
+
+    - name: "ACTION: Get specific properties for each node"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get status"
+      loop: "{{ all_nodes }}"
+      register: per_node_status
+      changed_when: false
+
+    - name: "OUTPUT: Per-node status"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | trim }}"
+      loop: "{{ per_node_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "CONCEPT: BMC / IPMI addresses"
+      ansible.builtin.debug:
+        msg: |
+          ── Out-of-Band Management ──
+          Each device has a BMC (Baseboard Management Controller) with its own IP.
+          This lets you power on/off/reset nodes even when the OS is down.
+
+    - name: "ACTION: Get BMC IP for each node"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get bmcipaddress"
+      loop: "{{ all_nodes }}"
+      register: bmc_ips
+      changed_when: false
+
+    - name: "OUTPUT: BMC addresses"
+      ansible.builtin.debug:
+        msg: "{{ item.item }} BMC → {{ item.stdout | trim }}"
+      loop: "{{ bmc_ips.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 01 Complete ═══
+          ✅ Listed all devices with: cmsh device; list
+          ✅ Inspected device details with: cmsh device; use <node>; show
+          ✅ Read individual properties with: cmsh device; use <node>; get <property>
+          ✅ Discovered BMC out-of-band IPs
+          
+          NEXT: Lab 02 — Categories (grouping nodes for management)

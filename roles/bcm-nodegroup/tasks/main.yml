@@ -1,0 +1,29 @@
+---
+# BCM Node Group Management Role
+# Manages categories, overlays, and node assignments
+
+- name: Set category software image
+  shell: >
+    cmsh -c "category; use {{ item.name }}; set softwareimage {{ item.image }}; commit"
+  loop: "{{ bcm_categories }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.image }}"
+  when: item.image is defined
+
+- name: Set category kernel parameters
+  shell: >
+    cmsh -c "category; use {{ item.name }}; set kernelparameters '{{ item.kernel_params }}'; commit"
+  loop: "{{ bcm_categories }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.kernel_params is defined
+
+- name: Assign nodes to categories
+  shell: >
+    cmsh -c "device; use {{ node }}; set category {{ item.name }}; commit"
+  loop: "{{ bcm_categories }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    node: "{{ item.nodes | join(' ') }}"
+  when: item.nodes is defined and item.nodes | length > 0

@@ -1,0 +1,57 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab — Global Variables
+# ═══════════════════════════════════════════════════════════════════
+
+# ── Fleet Metadata ──
+fleet_name: "BCM Lab Cluster"
+gpu_model: "virtual-gpu"
+
+# ── BCM Commands ──
+cmsh_bin: /usr/bin/cmsh
+
+# ── Node Naming ──
+all_nodes:
+  - cpu-n01
+  - cpu-n02
+  - gpu-n01
+
+cpu_nodes_list:
+  - cpu-n01
+  - cpu-n02
+
+gpu_nodes_list:
+  - gpu-n01
+
+# ── Slurm Configuration ──
+slurm_default_partition: "cpu"
+slurm_controller: "bcm11-headnode"
+
+# ── Debug Commands (subset for lab — no DGX hardware) ──
+debug_commands:
+  system:
+    - { name: "uptime",           cmd: "uptime" }
+    - { name: "free-h",           cmd: "free -h" }
+    - { name: "df-h",             cmd: "df -h" }
+    - { name: "dmesg-tail",       cmd: "dmesg | tail -50" }
+    - { name: "journalctl-1h",    cmd: "journalctl --since '1 hour ago' --no-pager -l | tail -100" }
+    - { name: "ip-addr",          cmd: "ip addr show" }
+    - { name: "lscpu",            cmd: "lscpu" }
+    - { name: "lspci",            cmd: "lspci" }
+
+  services:
+    - { name: "systemctl-failed", cmd: "systemctl --failed" }
+    - { name: "ps-top-cpu",       cmd: "ps aux --sort=-%cpu | head -20" }
+    - { name: "ss-listeners",     cmd: "ss -tlnp" }
+
+  bcm:
+    - { name: "cmsh-device-list", cmd: "cmsh -c 'device; list'" }
+    - { name: "cmsh-status",      cmd: "cmsh -c 'device; foreach * (get status)'" }
+    - { name: "cmsh-categories",  cmd: "cmsh -c 'category; list'" }
+    - { name: "cmsh-slurm-info",  cmd: "cmsh -c 'partition; list'" }
+
+# ── Drain Reasons ──
+drain_reasons:
+  fault: "fault-detected"
+  maintenance: "planned-maint"
+  sanity: "sanity-pending"

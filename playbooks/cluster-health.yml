@@ -1,0 +1,46 @@
+---
+- name: BCM Cluster Health Check
+  hosts: headnode
+  gather_facts: yes
+  tasks:
+    - name: Get hostname
+      command: hostname
+      register: hostname_out
+
+    - name: Get BCM device status
+      command: cmsh -c 'device list'
+      register: device_list
+
+    - name: Get Slurm partition status
+      command: sinfo
+      register: sinfo_out
+
+    - name: Get Slurm node details
+      command: scontrol show nodes
+      register: nodes_out
+
+    - name: Get BCM service status
+      command: systemctl is-active cmd slurmctld slurmdbd
+      register: services
+
+    - name: Get cluster accounting info
+      command: sacctmgr show cluster
+      register: cluster_info
+
+    - name: Display Cluster Health Report
+      debug:
+        msg: |
+          === BCM CLUSTER HEALTH REPORT ===
+          Hostname: {{ hostname_out.stdout }}
+          
+          === Device List ===
+          {{ device_list.stdout }}
+          
+          === Slurm Partitions ===
+          {{ sinfo_out.stdout }}
+          
+          === Services ===
+          {{ services.stdout }}
+          
+          === Cluster Info ===
+          {{ cluster_info.stdout }}

@@ -1,0 +1,204 @@
+---
+# ═══════════════════════════════════════════════════════════════════════
+# RSyslog Silence — Deploy MLX5 Noise Filter
+# ═══════════════════════════════════════════════════════════════════════
+# Deploys RSyslog filter to suppress noisy mlx5 ACCESS_REG(0x805) kernel
+# messages. Recommended by NVIDIA Support as workaround until DGX OS 7.4.0.
+#
+# Tags:
+#   deploy    — Deploy the filter config
+#   validate  — Validate RSyslog configuration
+#   test      — Run suppression tests
+#   rollback  — Remove the filter and restore original config
+#   logrotate — Deploy logrotate config (route mode only)
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── Pre-flight ────────────────────────────────────────────────────────
+- name: Verify RSyslog is installed
+  command: rsyslogd -v
+  register: rsyslog_version
+  changed_when: false
+  failed_when: rsyslog_version.rc != 0
+  tags: [deploy, validate]
+
+- name: Display RSyslog version
+  debug:
+    msg: "RSyslog version: {{ rsyslog_version.stdout_lines[0] }}"
+  tags: [deploy, validate]
+
+- name: Ensure rsyslog.d directory exists
+  file:
+    path: /etc/rsyslog.d
+    state: directory
+    mode: "0755"
+  tags: [deploy]
+
+# ── Backup ────────────────────────────────────────────────────────────
+- name: Create backup directory
+  file:
+    path: "{{ rsyslog_backup_dir }}"
+    state: directory
+    mode: "0750"
+  tags: [deploy]
+
+- name: Check for existing filter config
+  stat:
+    path: "{{ rsyslog_filter_dest }}"
+  register: existing_filter
+  tags: [deploy, rollback]
+
+- name: Backup existing filter config (if present)
+  copy:
+    src: "{{ rsyslog_filter_dest }}"
+    dest: "{{ rsyslog_backup_dir }}/{{ rsyslog_filter_filename }}.bak.{{ ansible_date_time.iso8601_basic_short }}"
+    remote_src: yes
+  when: existing_filter.stat.exists
+  tags: [deploy]
+
+- name: Backup current rsyslog.conf
+  copy:
+    src: /etc/rsyslog.conf
+    dest: "{{ rsyslog_backup_dir }}/rsyslog.conf.bak.{{ ansible_date_time.iso8601_basic_short }}"
+    remote_src: yes
+  tags: [deploy]
+
+# ── Deploy Filter ─────────────────────────────────────────────────────
+- name: Deploy RSyslog MLX5 noise filter
+  template:
+    src: 10-mlx5-filter.conf.j2
+    dest: "{{ rsyslog_filter_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: yes
+  notify:
+    - validate rsyslog config
+    - restart rsyslog
+  tags: [deploy]
+
+- name: Display deployed filter config
+  command: cat {{ rsyslog_filter_dest }}
+  register: deployed_filter
+  changed_when: false
+  tags: [deploy]
+
+- name: Show deployed filter
+  debug:
+    msg: "{{ deployed_filter.stdout }}"
+  tags: [deploy]
+
+# ── Logrotate (route mode) ────────────────────────────────────────────
+- name: Deploy logrotate config for noise log
+  template:
+    src: rsyslog-noise-logrotate.j2
+    dest: /etc/logrotate.d/kernel-noise
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - rsyslog_filter_mode == "route"
+    - rsyslog_logrotate | bool
+  tags: [deploy, logrotate]
+
+# ── Validate ──────────────────────────────────────────────────────────
+- name: Validate RSyslog configuration
+  command: rsyslogd -N1
+  register: rsyslog_validate
+  changed_when: false
+  failed_when: rsyslog_validate.rc != 0
+  tags: [deploy, validate]
+
+- name: Display validation result
+  debug:
+    msg: "{{ rsyslog_validate.stderr_lines | default(rsyslog_validate.stdout_lines) }}"
+  tags: [deploy, validate]
+
+# ── Restart RSyslog ───────────────────────────────────────────────────
+- name: Restart RSyslog service
+  systemd:
+    name: rsyslog
+    state: restarted
+    daemon_reload: yes
+  tags: [deploy]
+
+- name: Verify RSyslog is running
+  command: systemctl is-active rsyslog
+  register: rsyslog_status
+  changed_when: false
+  failed_when: rsyslog_status.stdout != "active"
+  tags: [deploy, validate]
+
+- name: Display RSyslog status
+  debug:
+    msg: "RSyslog status: {{ rsyslog_status.stdout }}"
+  tags: [deploy, validate]
+
+# ── Suppression Test ──────────────────────────────────────────────────
+- name: "TEST: Inject fake ACCESS_REG(0x805) message via logger"
+  command: logger -p kern.info -t kernel "ACCESS_REG(0x805) ANSIBLE_TEST_{{ ansible_date_time.epoch }}"
+  when: rsyslog_run_tests | bool
+  tags: [test]
+
+- name: "TEST: Wait for log propagation"
+  pause:
+    seconds: 3
+  when: rsyslog_run_tests | bool
+  tags: [test]
+
+- name: "TEST: Check if message was suppressed from syslog"
+  shell: grep "ACCESS_REG(0x805) ANSIBLE_TEST_{{ ansible_date_time.epoch }}" /var/log/syslog || true
+  register: syslog_check
+  changed_when: false
+  when: rsyslog_run_tests | bool
+  tags: [test]
+
+- name: "TEST: Verify suppression result"
+  assert:
+    that:
+      - syslog_check.stdout == ""
+    success_msg: "✅ ACCESS_REG(0x805) messages are successfully suppressed from /var/log/syslog"
+    fail_msg: "❌ Suppression FAILED — message still appears in /var/log/syslog: {{ syslog_check.stdout }}"
+  when: rsyslog_run_tests | bool
+  tags: [test]
+
+- name: "TEST: Check noise log (route mode)"
+  shell: grep "ACCESS_REG(0x805) ANSIBLE_TEST_{{ ansible_date_time.epoch }}" {{ rsyslog_noise_log_path }} || true
+  register: noise_log_check
+  changed_when: false
+  when:
+    - rsyslog_run_tests | bool
+    - rsyslog_filter_mode == "route"
+  tags: [test]
+
+- name: "TEST: Verify route-to-file result"
+  assert:
+    that:
+      - noise_log_check.stdout != ""
+    success_msg: "✅ Messages are routed to {{ rsyslog_noise_log_path }}"
+    fail_msg: "❌ Route-to-file FAILED — message not found in {{ rsyslog_noise_log_path }}"
+  when:
+    - rsyslog_run_tests | bool
+    - rsyslog_filter_mode == "route"
+  tags: [test]
+
+# ── Rollback ──────────────────────────────────────────────────────────
+- name: "ROLLBACK: Remove RSyslog filter"
+  file:
+    path: "{{ rsyslog_filter_dest }}"
+    state: absent
+  notify:
+    - validate rsyslog config
+    - restart rsyslog
+  tags: [rollback, never]
+
+- name: "ROLLBACK: Remove logrotate config"
+  file:
+    path: /etc/logrotate.d/kernel-noise
+    state: absent
+  tags: [rollback, never]
+
+- name: "ROLLBACK: Restart RSyslog after removal"
+  systemd:
+    name: rsyslog
+    state: restarted
+  tags: [rollback, never]

@@ -1,0 +1,117 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Cluster Health Check — BCM Status & System Health
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   ansible-playbook playbooks/cluster_health.yml
+#   ansible-playbook playbooks/cluster_health.yml -e "targets=['cpu-n01']"
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Cluster Health Check"
+  hosts: bcm_headnodes
+  gather_facts: true
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else all_nodes }}"
+
+  tasks:
+    # ── Head Node Health ──
+    - name: "Head node system info"
+      ansible.builtin.debug:
+        msg: |
+          ═══ BCM HEAD NODE ═══
+          Hostname:  {{ ansible_hostname }}
+          OS:        {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Kernel:    {{ ansible_kernel }}
+          CPUs:      {{ ansible_processor_vcpus }}
+          Memory:    {{ ansible_memtotal_mb }} MB
+          Uptime:    {{ ansible_uptime_seconds | int // 3600 }}h {{ (ansible_uptime_seconds | int % 3600) // 60 }}m
+
+    # ── BCM Service Status ──
+    - name: "Check BCM services"
+      ansible.builtin.shell: |
+        systemctl is-active {{ item }} 2>/dev/null || echo "inactive"
+      loop:
+        - cmd
+        - cmdaemon
+        - cmsh
+        - apache2
+        - slurmctld
+        - slurmdbd
+        - mysqld
+        - named
+        - dhcpd
+        - tftpd-hpa
+      register: service_check
+      changed_when: false
+      failed_when: false
+
+    - name: "Report BCM services"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | trim }}"
+      loop: "{{ service_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # ── cmsh Device Status ──
+    - name: "Get BCM device status"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; list" 2>/dev/null || echo "cmsh not available"
+      register: device_list
+      changed_when: false
+
+    - name: "Display device list"
+      ansible.builtin.debug:
+        msg: "{{ device_list.stdout_lines }}"
+
+    # ── Node-Level Health ──
+    - name: "Check node status via cmsh"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get status" 2>/dev/null | tail -1
+      loop: "{{ target_nodes }}"
+      register: node_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Report node status"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | default('UNKNOWN') | trim }}"
+      loop: "{{ node_status.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # ── Slurm Status ──
+    - name: "Slurm cluster info"
+      ansible.builtin.shell: |
+        sinfo --format="%P %a %D %N %t" 2>/dev/null || echo "Slurm not configured"
+      register: slurm_info
+      changed_when: false
+      failed_when: false
+
+    - name: "Display Slurm info"
+      ansible.builtin.debug:
+        msg: "{{ slurm_info.stdout_lines }}"
+
+    - name: "Slurm job queue"
+      ansible.builtin.shell: |
+        squeue -l 2>/dev/null || echo "No jobs"
+      register: slurm_queue
+      changed_when: false
+      failed_when: false
+
+    - name: "Display Slurm queue"
+      ansible.builtin.debug:
+        msg: "{{ slurm_queue.stdout_lines }}"
+
+    # ── Summary ──
+    - name: "Health check summary"
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════
+          CLUSTER HEALTH SUMMARY
+          ═══════════════════════════════════════════
+          Head Node:     {{ ansible_hostname }}
+          BCM Version:   {{ bcm_version }}
+          Nodes Checked: {{ target_nodes | length }}
+          Slurm Status:  {{ 'OK' if slurm_info.rc == 0 else 'NOT CONFIGURED' }}
+          ═══════════════════════════════════════════

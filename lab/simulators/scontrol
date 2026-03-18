@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════
+# Stateful scontrol Simulator
+# ═══════════════════════════════════════════════════════════════════
+STATE_DIR="${CMSH_STATE_DIR:-/tmp/bcm-lab-state}"
+SLURM_STATE="$STATE_DIR/slurm_nodes.json"
+
+# Init Slurm state
+if [ ! -f "$SLURM_STATE" ]; then
+    cat > "$SLURM_STATE" << 'JSON'
+{
+  "cpu-n01": {"state":"idle","partition":"cpu","cpus":4,"memory":8192,"reason":""},
+  "cpu-n02": {"state":"idle","partition":"cpu","cpus":4,"memory":8192,"reason":""},
+  "gpu-n01": {"state":"idle","partition":"gpu","cpus":4,"memory":8192,"gres":"gpu:1","reason":""}
+}
+JSON
+fi
+
+if [ ! -f "$STATE_DIR/slurm_jobs.json" ]; then
+    echo '{}' > "$STATE_DIR/slurm_jobs.json"
+fi
+
+case "$1" in
+    update)
+        shift
+        # Parse NodeName=X State=Y Reason="Z"
+        node="" new_state="" reason=""
+        for arg in "$@"; do
+            case "$arg" in
+                NodeName=*) node="${arg#NodeName=}" ;;
+                State=*)    new_state="${arg#State=}" ;;
+                Reason=*)   reason="${arg#Reason=}"; reason="${reason#\"}"; reason="${reason%\"}" ;;
+            esac
+        done
+        if [ -n "$node" ] && [ -n "$new_state" ]; then
+            python3 -c "
+import json
+with open('$SLURM_STATE') as f: data = json.load(f)
+new_state = '$new_state'.lower()
+if new_state == 'drain': new_state = 'drained'
+if new_state == 'resume': new_state = 'idle'
+if '$node' in data:
+    data['$node']['state'] = new_state
+    data['$node']['reason'] = '$reason'
+with open('$SLURM_STATE','w') as f: json.dump(data, f, indent=2)
+"
+            echo "Node $node state updated to $new_state"
+        fi
+        ;;
+    show)
+        shift
+        case "$1" in
+            nodes|node)
+                python3 -c "
+import json
+with open('$SLURM_STATE') as f: data = json.load(f)
+for name, n in sorted(data.items()):
+    print(f'NodeName={name} CPUs={n[\"cpus\"]} RealMemory={n[\"memory\"]} State={n[\"state\"].upper()} Partitions={n[\"partition\"]}')
+    if n.get('gres'):
+        print(f'   Gres={n[\"gres\"]}')
+    if n.get('reason'):
+        print(f'   Reason={n[\"reason\"]}')
+    print()
+"
+                ;;
+            *)
+                echo "Usage: scontrol show nodes"
+                ;;
+        esac
+        ;;
+    *)
+        echo "scontrol: unknown command '$1'"
+        ;;
+esac

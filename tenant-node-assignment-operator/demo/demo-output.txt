@@ -1,0 +1,223 @@
+
+[44m[1m  ╔══════════════════════════════════════════════════════════════════╗  
+[44m[1m  ║     COMPUTE PLATFORM OPERATOR — MVP DEMO                       ║  
+[44m[1m  ║     Running 4 scenarios with real workflow engine               ║  
+[44m[1m  ╚══════════════════════════════════════════════════════════════════╝  
+
+[34m[1m══════════════════════════════════════════════════════════════════════
+[34m[1m                     Scenario 1: NODE ASSIGNMENT[0m
+[34m══════════════════════════════════════════════════════════════════════[0m
+[2m  Claim gpu-node-01 for team-alpha. Label, wait for agent, record readiness.[0m
+
+  [1m[37mCR:[0m assign-gpu-01 (owner=team-alpha, node=gpu-node-01)
+
+  [1m[36m❯ Step 1: validate-spec[0m
+    [2mEnsure CR has owner and node references[0m
+    [32m✓ COMPLETED[0m — spec validation passed
+
+  [1m[36m❯ Step 2: fetch-target-node[0m
+    [2mFetch gpu-node-01 from Kubernetes API[0m
+    [32m✓ COMPLETED[0m — fetched node "gpu-node-01"
+
+  [1m[36m❯ Step 3: apply-ownership-label[0m
+    [2mSet compute-platform.io/owner=team-alpha[0m
+    [32m✓ COMPLETED[0m — set label compute-platform.io/owner=team-alpha on node gpu-node-01
+
+  [1m[36m❯ Step 4: await-node-agent[0m
+    [2mWait for on-node agent: node-agent-ready=true[0m
+    [33m⏳ WAITING[0m — waiting for annotation compute-platform.io/node-agent-ready=true
+    [33m🔔 Simulating external agent signal...[0m
+    [32m✓ COMPLETED[0m — annotation compute-platform.io/node-agent-ready=true found
+
+  [1m[36m❯ Step 5: update-readiness[0m
+    [2mRecord team-alpha.gpu-node-01=ready in ConfigMap[0m
+    [32m✓ COMPLETED[0m — created configmap compute-platform-system/node-readiness with team-alpha.gpu-node-01=ready
+
+  [1m[37m📋 Node State: gpu-node-01[0m
+    [2mLabels:[0m
+      [36mcompute-platform.io/owner[0m = [32mteam-alpha[0m
+    [2mAnnotations:[0m
+      [35mcompute-platform.io/node-agent-ready[0m = [32mtrue[0m
+
+[2m──────────────────────────────────────────────────────────────────────[0m
+  [1m[37m🔍 Validations:[0m
+    [1m[32m✅  PASS: Node label compute-platform.io/owner=team-alpha[0m
+    [1m[32m✅  PASS: ConfigMap node-readiness[team-alpha.gpu-node-01]=ready[0m
+
+  [42m[1m  ══════════════════════════════════════════  [0m
+  [42m[1m    ✅  SCENARIO 1 PASSED                    [0m
+  [42m[1m  ══════════════════════════════════════════  [0m
+
+[31m[1m══════════════════════════════════════════════════════════════════════
+[31m[1m                    Scenario 2: NODE DECOMMISSION[0m
+[31m══════════════════════════════════════════════════════════════════════[0m
+[2m  Decommission gpu-node-02. Label, request drain, wait, record.[0m
+
+  [1m[37mCR:[0m decommission-gpu-02 (owner=infra, node=gpu-node-02)
+
+  [1m[36m❯ Step 1: validate-spec[0m
+    [2mEnsure CR has valid references[0m
+    [32m✓ COMPLETED[0m — spec validation passed
+
+  [1m[36m❯ Step 2: fetch-target-node[0m
+    [2mFetch gpu-node-02[0m
+    [32m✓ COMPLETED[0m — fetched node "gpu-node-02"
+
+  [1m[36m❯ Step 3: mark-decommissioning[0m
+    [2mSet lifecycle=decommissioning[0m
+    [32m✓ COMPLETED[0m — set label compute-platform.io/lifecycle=decommissioning on node gpu-node-02
+
+  [1m[36m❯ Step 4: request-drain[0m
+    [2mSignal drain controller: request-drain=true[0m
+    [32m✓ COMPLETED[0m — set annotation compute-platform.io/request-drain=true on node gpu-node-02
+
+  [1m[36m❯ Step 5: wait-drain[0m
+    [2mWait for drain-complete=true[0m
+    [33m⏳ WAITING[0m — waiting for annotation compute-platform.io/drain-complete=true
+    [33m🔔 Simulating external agent signal...[0m
+    [32m✓ COMPLETED[0m — annotation compute-platform.io/drain-complete=true found
+
+  [1m[36m❯ Step 6: record-decommission[0m
+    [2mRecord in decommissioned-nodes ConfigMap[0m
+    [32m✓ COMPLETED[0m — created configmap compute-platform-system/decommissioned-nodes with gpu-node-02=infra
+
+  [1m[37m📋 Node State: gpu-node-02[0m
+    [2mLabels:[0m
+      [36mcompute-platform.io/lifecycle[0m = [32mdecommissioning[0m
+    [2mAnnotations:[0m
+      [35mcompute-platform.io/drain-complete[0m = [32mtrue[0m
+      [35mcompute-platform.io/request-drain[0m = [32mtrue[0m
+
+[2m──────────────────────────────────────────────────────────────────────[0m
+  [1m[37m🔍 Validations:[0m
+    [1m[32m✅  PASS: Node label lifecycle=decommissioning[0m
+    [1m[32m✅  PASS: Drain annotation request-drain=true[0m
+    [1m[32m✅  PASS: ConfigMap decommissioned-nodes[gpu-node-02]=infra[0m
+
+  [42m[1m  ══════════════════════════════════════════  [0m
+  [42m[1m    ✅  SCENARIO 2 PASSED                    [0m
+  [42m[1m  ══════════════════════════════════════════  [0m
+
+[36m[1m══════════════════════════════════════════════════════════════════════
+[36m[1m                     Scenario 3: NODE HEALTH GATE[0m
+[36m══════════════════════════════════════════════════════════════════════[0m
+[2m  Block cpu-node-01 until GPU and network checks pass.[0m
+
+  [1m[37mCR:[0m health-gate-cpu-01 (owner=team-gamma, node=cpu-node-01)
+
+  [1m[36m❯ Step 1: validate-spec[0m
+    [2mEnsure CR has valid references[0m
+    [32m✓ COMPLETED[0m — spec validation passed
+
+  [1m[36m❯ Step 2: fetch-target-node[0m
+    [2mFetch cpu-node-01[0m
+    [32m✓ COMPLETED[0m — fetched node "cpu-node-01"
+
+  [1m[36m❯ Step 3: set-gate-pending[0m
+    [2mSet health-gate=pending[0m
+    [32m✓ COMPLETED[0m — set label compute-platform.io/health-gate=pending on node cpu-node-01
+
+  [1m[36m❯ Step 4: wait-gpu-check[0m
+    [2mWait for gpu-check-passed=true[0m
+    [33m⏳ WAITING[0m — waiting for annotation compute-platform.io/gpu-check-passed=true
+    [33m🔔 Simulating external agent signal...[0m
+    [32m✓ COMPLETED[0m — annotation compute-platform.io/gpu-check-passed=true found
+
+  [1m[36m❯ Step 5: wait-network-check[0m
+    [2mWait for network-check-passed=true[0m
+    [33m⏳ WAITING[0m — waiting for annotation compute-platform.io/network-check-passed=true
+    [33m🔔 Simulating external agent signal...[0m
+    [32m✓ COMPLETED[0m — annotation compute-platform.io/network-check-passed=true found
+
+  [1m[36m❯ Step 6: mark-healthy[0m
+    [2mSet health-gate=passed[0m
+    [32m✓ COMPLETED[0m — set label compute-platform.io/health-gate=passed on node cpu-node-01
+
+  [1m[36m❯ Step 7: record-healthy[0m
+    [2mRecord in healthy-nodes ConfigMap[0m
+    [32m✓ COMPLETED[0m — created configmap compute-platform-system/healthy-nodes with cpu-node-01=ready
+
+  [1m[37m📋 Node State: cpu-node-01[0m
+    [2mLabels:[0m
+      [36mcompute-platform.io/health-gate[0m = [32mpassed[0m
+    [2mAnnotations:[0m
+      [35mcompute-platform.io/gpu-check-passed[0m = [32mtrue[0m
+      [35mcompute-platform.io/network-check-passed[0m = [32mtrue[0m
+
+[2m──────────────────────────────────────────────────────────────────────[0m
+  [1m[37m🔍 Validations:[0m
+    [1m[32m✅  PASS: Node label health-gate=passed[0m
+    [1m[32m✅  PASS: ConfigMap healthy-nodes[cpu-node-01]=ready[0m
+
+  [42m[1m  ══════════════════════════════════════════  [0m
+  [42m[1m    ✅  SCENARIO 3 PASSED                    [0m
+  [42m[1m  ══════════════════════════════════════════  [0m
+
+[35m[1m══════════════════════════════════════════════════════════════════════
+[35m[1m                  Scenario 4: BURN-IN ORCHESTRATION[0m
+[35m══════════════════════════════════════════════════════════════════════[0m
+[2m  Burn-in gpu-node-03. Isolate, signal harness, wait for results, certify.[0m
+
+  [1m[37mCR:[0m burnin-gpu-03 (owner=team-beta, node=gpu-node-03)
+
+  [1m[36m❯ Step 1: validate-spec[0m
+    [2mEnsure CR has valid references[0m
+    [32m✓ COMPLETED[0m — spec validation passed
+
+  [1m[36m❯ Step 2: fetch-target-node[0m
+    [2mFetch gpu-node-03[0m
+    [32m✓ COMPLETED[0m — fetched node "gpu-node-03"
+
+  [1m[36m❯ Step 3: mark-burn-in[0m
+    [2mSet phase=burn-in (isolate from production)[0m
+    [32m✓ COMPLETED[0m — set label compute-platform.io/phase=burn-in on node gpu-node-03
+
+  [1m[36m❯ Step 4: signal-test-start[0m
+    [2mSignal test harness: burn-in-start=true[0m
+    [32m✓ COMPLETED[0m — set annotation compute-platform.io/burn-in-start=true on node gpu-node-03
+
+  [1m[36m❯ Step 5: wait-test-result[0m
+    [2mWait for burn-in-result=pass[0m
+    [33m⏳ WAITING[0m — waiting for annotation compute-platform.io/burn-in-result=pass
+    [33m🔔 Simulating external agent signal...[0m
+    [32m✓ COMPLETED[0m — annotation compute-platform.io/burn-in-result=pass found
+
+  [1m[36m❯ Step 6: mark-production[0m
+    [2mSet phase=production (schedulable)[0m
+    [32m✓ COMPLETED[0m — set label compute-platform.io/phase=production on node gpu-node-03
+
+  [1m[36m❯ Step 7: record-certified[0m
+    [2mRecord in certified-nodes ConfigMap[0m
+    [32m✓ COMPLETED[0m — created configmap compute-platform-system/certified-nodes with team-beta.gpu-node-03=certified
+
+  [1m[37m📋 Node State: gpu-node-03[0m
+    [2mLabels:[0m
+      [36mcompute-platform.io/phase[0m = [32mproduction[0m
+    [2mAnnotations:[0m
+      [35mcompute-platform.io/burn-in-result[0m = [32mpass[0m
+      [35mcompute-platform.io/burn-in-start[0m = [32mtrue[0m
+
+[2m──────────────────────────────────────────────────────────────────────[0m
+  [1m[37m🔍 Validations:[0m
+    [1m[32m✅  PASS: Node label phase=production[0m
+    [1m[32m✅  PASS: Test harness signal burn-in-start=true[0m
+    [1m[32m✅  PASS: ConfigMap certified-nodes[team-beta.gpu-node-03]=certified[0m
+
+  [42m[1m  ══════════════════════════════════════════  [0m
+  [42m[1m    ✅  SCENARIO 4 PASSED                    [0m
+  [42m[1m  ══════════════════════════════════════════  [0m
+
+[42m[1m  ╔══════════════════════════════════════════════════════════════════╗  
+[42m[1m  ║    🎉  ALL 4 SCENARIOS PASSED — MVP DEMO COMPLETE              ║  
+[42m[1m  ╚══════════════════════════════════════════════════════════════════╝  
+
+  [1mScenario 1:[0m Node Assignment     [32m✅  PASS[0m
+  [1mScenario 2:[0m Node Decommission   [32m✅  PASS[0m
+  [1mScenario 3:[0m Node Health Gate    [32m✅  PASS[0m
+  [1mScenario 4:[0m Burn-In Orchestrate [32m✅  PASS[0m
+
+  [2mEngine:[0m Real workflow engine (internal/workflow/engine.go)
+  [2mClient:[0m controller-runtime fake client (same as unit tests)
+  [2mSteps:[0m  12 step types available, 4 scenarios demonstrated
+  [2mBinary:[0m Same binary — different YAML = different behavior
+

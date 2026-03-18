@@ -1,0 +1,258 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Ansible GitOps — GitHub Actions Workflow
+# ═══════════════════════════════════════════════════════════════════
+# Triggers on PR merge to main. Reads operation request YAML files
+# from operation-requests/, validates them, and calls Ansible Tower
+# to execute the requested playbook.
+
+name: BCM GitOps — Execute Operation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'operation-requests/**'
+      - '!operation-requests/_template.yml'
+      - '!operation-requests/examples/**'
+
+  # Allow manual trigger for re-runs
+  workflow_dispatch:
+    inputs:
+      operation_file:
+        description: 'Path to operation request YAML (e.g., operation-requests/reboot-node-042.yml)'
+        required: true
+        type: string
+
+env:
+  TOWER_HOST: ${{ secrets.ANSIBLE_TOWER_HOST }}
+  TOWER_TOKEN: ${{ secrets.ANSIBLE_TOWER_TOKEN }}
+  TOWER_VERIFY_SSL: 'true'
+
+jobs:
+  validate:
+    name: Validate Operation Request
+    runs-on: ubuntu-latest
+    outputs:
+      operation_files: ${{ steps.find-ops.outputs.files }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Find changed operation files
+        id: find-ops
+        run: |
+          if [ -n "${{ github.event.inputs.operation_file }}" ]; then
+            FILES='["${{ github.event.inputs.operation_file }}"]'
+          else
+            FILES=$(git diff --name-only HEAD~1 HEAD -- 'operation-requests/' \
+              | grep -v '_template.yml' \
+              | grep -v 'examples/' \
+              | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Operation files: $FILES"
+
+      - name: Validate YAML schema
+        run: |
+          pip install pyyaml jsonschema
+          python3 << 'VALIDATE'
+          import yaml, json, sys
+
+          schema = {
+            "type": "object",
+            "required": ["operation", "targets", "requested_by"],
+            "properties": {
+              "operation": {"type": "string", "enum": [
+                "day0_provision", "day2_reboot", "day2_power",
+                "day2_cordon", "day2_uncordon", "day2_bcm_status",
+                "day2_gpu_reset", "day2_ib_reset", "day2_service_restart",
+                "debug_bundle", "debug_nvsm_dump", "debug_ib_diag",
+                "debug_gpu_diag", "debug_logs", "firmware_check",
+                "burnin_dcgmi", "burnin_nccl", "burnin_hpl",
+                "burnin_nvbandwidth", "burnin_nemo", "burnin_suite"
+              ]},
+              "targets": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "parameters": {"type": "object"},
+              "requested_by": {"type": "string", "format": "email"},
+              "approved_by": {"type": "string"},
+              "reason": {"type": "string"}
+            }
+          }
+
+          files = json.loads('${{ steps.find-ops.outputs.files }}')
+          for f in files:
+              with open(f) as fh:
+                  data = yaml.safe_load(fh)
+              # Basic validation
+              for req in schema["required"]:
+                  if req not in data:
+                      print(f"ERROR: {f} missing required field '{req}'")
+                      sys.exit(1)
+              if data["operation"] not in schema["properties"]["operation"]["enum"]:
+                  print(f"ERROR: {f} has invalid operation '{data['operation']}'")
+                  sys.exit(1)
+              print(f"✅ {f} — valid ({data['operation']} on {len(data['targets'])} nodes)")
+          VALIDATE
+
+  execute:
+    name: Execute via Ansible Tower
+    needs: validate
+    runs-on: ubuntu-latest
+    if: needs.validate.outputs.operation_files != '[]'
+    strategy:
+      matrix:
+        operation_file: ${{ fromJson(needs.validate.outputs.operation_files) }}
+      max-parallel: 1  # Execute operations sequentially for safety
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse operation request
+        id: parse
+        run: |
+          pip install pyyaml
+          python3 << 'PARSE'
+          import yaml, json, os
+
+          with open("${{ matrix.operation_file }}") as f:
+              data = yaml.safe_load(f)
+
+          # Map operation to playbook
+          playbook_map = {
+              "day0_provision": "playbooks/day0_provision.yml",
+              "day2_reboot": "playbooks/day2_reboot.yml",
+              "day2_power": "playbooks/day2_power.yml",
+              "day2_cordon": "playbooks/day2_cordon.yml",
+              "day2_uncordon": "playbooks/day2_uncordon.yml",
+              "day2_bcm_status": "playbooks/day2_bcm_status.yml",
+              "day2_gpu_reset": "playbooks/day2_gpu_reset.yml",
+              "day2_ib_reset": "playbooks/day2_ib_reset.yml",
+              "day2_service_restart": "playbooks/day2_service_restart.yml",
+              "debug_bundle": "playbooks/debug_bundle.yml",
+              "debug_nvsm_dump": "playbooks/debug_nvsm_dump.yml",
+              "debug_ib_diag": "playbooks/debug_ib_diag.yml",
+              "debug_gpu_diag": "playbooks/debug_gpu_diag.yml",
+              "debug_logs": "playbooks/debug_logs.yml",
+              "firmware_check": "playbooks/firmware_check.yml",
+              "burnin_dcgmi": "playbooks/burnin_dcgmi.yml",
+              "burnin_nccl": "playbooks/burnin_nccl.yml",
+              "burnin_hpl": "playbooks/burnin_hpl.yml",
+              "burnin_nvbandwidth": "playbooks/burnin_nvbandwidth.yml",
+              "burnin_nemo": "playbooks/burnin_nemo.yml",
+              "burnin_suite": "playbooks/burnin_suite.yml",
+          }
+
+          env_file = os.environ.get("GITHUB_OUTPUT", "/dev/stdout")
+          with open(env_file, "a") as out:
+              out.write(f"operation={data['operation']}\n")
+              out.write(f"playbook={playbook_map[data['operation']]}\n")
+              out.write(f"targets={json.dumps(data['targets'])}\n")
+              out.write(f"parameters={json.dumps(data.get('parameters', {}))}\n")
+              out.write(f"requested_by={data.get('requested_by', 'unknown')}\n")
+              out.write(f"reason={data.get('reason', 'No reason provided')}\n")
+          PARSE
+
+      - name: Launch Ansible Tower Job
+        id: tower
+        run: |
+          echo "═══════════════════════════════════════════════"
+          echo "  Launching Ansible Tower Job"
+          echo "  Operation:  ${{ steps.parse.outputs.operation }}"
+          echo "  Playbook:   ${{ steps.parse.outputs.playbook }}"
+          echo "  Targets:    ${{ steps.parse.outputs.targets }}"
+          echo "  Requested:  ${{ steps.parse.outputs.requested_by }}"
+          echo "═══════════════════════════════════════════════"
+
+          # Launch job template via Tower API
+          RESPONSE=$(curl -s -X POST \
+            "${TOWER_HOST}/api/v2/job_templates/BCM-GitOps-Runner/launch/" \
+            -H "Authorization: Bearer ${TOWER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "extra_vars": {
+                "targets": ${{ steps.parse.outputs.targets }},
+                "parameters": ${{ steps.parse.outputs.parameters }},
+                "playbook_path": "${{ steps.parse.outputs.playbook }}"
+              }
+            }')
+
+          JOB_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+          if [ -z "$JOB_ID" ]; then
+            echo "ERROR: Failed to launch Tower job"
+            echo "$RESPONSE" | jq .
+            exit 1
+          fi
+
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+          echo "✅ Job launched: ID=$JOB_ID"
+
+      - name: Wait for Job Completion
+        run: |
+          JOB_ID="${{ steps.tower.outputs.job_id }}"
+          echo "Waiting for Tower job $JOB_ID..."
+
+          for i in $(seq 1 120); do
+            STATUS=$(curl -s \
+              "${TOWER_HOST}/api/v2/jobs/${JOB_ID}/" \
+              -H "Authorization: Bearer ${TOWER_TOKEN}" \
+              | jq -r '.status')
+
+            echo "  [$i/120] Status: $STATUS"
+
+            case "$STATUS" in
+              successful)
+                echo "✅ Job completed successfully"
+                exit 0
+                ;;
+              failed|error|canceled)
+                echo "❌ Job failed with status: $STATUS"
+                # Fetch job output for debugging
+                curl -s "${TOWER_HOST}/api/v2/jobs/${JOB_ID}/stdout/?format=txt" \
+                  -H "Authorization: Bearer ${TOWER_TOKEN}" | tail -50
+                exit 1
+                ;;
+            esac
+            sleep 15
+          done
+
+          echo "⏰ Timeout waiting for job $JOB_ID"
+          exit 1
+
+      - name: Post Results to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const operation = '${{ steps.parse.outputs.operation }}';
+            const targets = ${{ steps.parse.outputs.targets }};
+            const jobId = '${{ steps.tower.outputs.job_id }}';
+            const status = '${{ job.status }}';
+            const icon = status === 'success' ? '✅' : '❌';
+
+            // Find the merge commit's associated PR
+            const commits = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha
+            });
+
+            if (commits.data.length > 0) {
+              const prNumber = commits.data[0].number;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `## ${icon} BCM Operation Result\n\n` +
+                      `| Field | Value |\n` +
+                      `|-------|-------|\n` +
+                      `| **Operation** | \`${operation}\` |\n` +
+                      `| **Targets** | ${targets.join(', ')} |\n` +
+                      `| **Tower Job** | ${jobId} |\n` +
+                      `| **Status** | ${status} |\n` +
+                      `| **Workflow** | [Run #${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |\n`
+              });
+            }

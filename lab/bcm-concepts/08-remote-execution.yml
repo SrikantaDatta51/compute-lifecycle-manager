@@ -1,0 +1,83 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Lab 08 — Remote Execution (cmsh exec)
+# ═══════════════════════════════════════════════════════════════════
+# CONCEPTS:
+#   - cmsh exec lets you run commands ON a node FROM the head node
+#   - No SSH needed — BCM uses its own protocol
+#   - Great for: nvidia-smi, ibstat, dmesg, service checks
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Lab 08 — Remote Execution"
+  hosts: bcm_headnodes
+  gather_facts: false
+  tasks:
+    - name: "CONCEPT: cmsh exec"
+      ansible.builtin.debug:
+        msg: |
+          ── Remote Execution ──
+          cmsh exec runs a command on a remote node WITHOUT SSH.
+          BCM uses its own agent (cmd) on each node.
+          
+          Syntax: cmsh -c "device; use <node>; exec '<command>'"
+
+    - name: "ACTION: Check GPU on gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'nvidia-smi -L'"
+      register: gpu_check
+      changed_when: false
+
+    - name: "OUTPUT: GPU info"
+      ansible.builtin.debug:
+        msg: "{{ gpu_check.stdout_lines }}"
+
+    - name: "ACTION: Check uptime on all nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'uptime'"
+      loop: "{{ all_nodes }}"
+      register: uptimes
+      changed_when: false
+
+    - name: "OUTPUT: Uptime per node"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout_lines[-1] | default('N/A') }}"
+      loop: "{{ uptimes.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "ACTION: Check memory on all nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; exec 'free -h'"
+      loop: "{{ all_nodes }}"
+      register: mem_check
+      changed_when: false
+
+    - name: "OUTPUT: Memory per node"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}:\n{{ item.stdout }}"
+      loop: "{{ mem_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: "ACTION: Check service status on gpu-n01"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use gpu-n01; exec 'systemctl is-active nvidia-fabricmanager'"
+      register: svc
+      changed_when: false
+
+    - name: "OUTPUT: Service status"
+      ansible.builtin.debug:
+        msg: "nvidia-fabricmanager on gpu-n01: {{ svc.stdout_lines[-1] | default('unknown') }}"
+
+    - name: "SUMMARY"
+      ansible.builtin.debug:
+        msg: |
+          ═══ Lab 08 Complete ═══
+          ✅ Ran nvidia-smi remotely on gpu-n01
+          ✅ Checked uptime on all nodes
+          ✅ Checked memory on all nodes
+          ✅ Checked service status remotely
+          
+          KEY: cmsh exec = run any command on any node without SSH.
+          
+          NEXT: Lab 09 — Health Monitoring

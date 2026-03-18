@@ -1,0 +1,14 @@
+# Logrotate config for MLX5 kernel noise log
+# Deployed by Ansible (bcm-iac/roles/rsyslog-silence)
+{{ rsyslog_noise_log_path }} {
+    daily
+    rotate {{ rsyslog_logrotate_days }}
+    size {{ rsyslog_logrotate_size }}
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate
+    endscript
+}

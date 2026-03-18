@@ -1,0 +1,42 @@
+---
+- name: BCM Configuration Audit
+  hosts: headnode
+  gather_facts: no
+  tasks:
+    - name: Get categories
+      command: cmsh -c 'category list'
+      register: categories
+
+    - name: Get software images
+      command: cmsh -c 'softwareimage list'
+      register: images
+
+    - name: Get configuration overlays
+      command: cmsh -c 'configurationoverlay list'
+      register: overlays
+
+    - name: Get networks
+      command: cmsh -c 'network list'
+      register: networks
+
+    - name: Get partition info
+      command: cmsh -c 'partition list'
+      register: partitions
+
+    - name: Display BCM Configuration
+      debug:
+        msg: |
+          === CATEGORIES ===
+          {{ categories.stdout }}
+          
+          === SOFTWARE IMAGES ===
+          {{ images.stdout }}
+          
+          === OVERLAYS ===
+          {{ overlays.stdout }}
+          
+          === NETWORKS ===
+          {{ networks.stdout }}
+          
+          === PARTITIONS ===
+          {{ partitions.stdout }}

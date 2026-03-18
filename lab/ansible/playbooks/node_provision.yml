@@ -1,0 +1,92 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Node Provisioning — PXE Boot & Category Assignment via cmsh
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   # Provision nodes (set to INSTALL and reboot)
+#   ansible-playbook playbooks/node_provision.yml \
+#       -e "targets=['cpu-n01']" -e "category=default"
+#
+#   # List all categories
+#   ansible-playbook playbooks/node_provision.yml -e "action=list_categories"
+#
+#   # Show node details
+#   ansible-playbook playbooks/node_provision.yml -e "action=show" -e "targets=['cpu-n01']"
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Node Provisioning via BCM"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    action: "provision"
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    category: "default"
+
+  tasks:
+    # ═══ ACTION: list_categories ═══
+    - name: "List BCM categories"
+      when: action == "list_categories"
+      block:
+        - name: "Get categories"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "category; list"
+          register: cat_list
+          changed_when: false
+
+        - name: "Categories"
+          ansible.builtin.debug:
+            msg: "{{ cat_list.stdout_lines }}"
+
+    # ═══ ACTION: show ═══
+    - name: "Show node details"
+      when: action == "show"
+      block:
+        - name: "Get node info"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "device; use {{ item }}; show" 2>/dev/null || echo "Node not found"
+          loop: "{{ target_nodes }}"
+          register: node_info
+          changed_when: false
+
+        - name: "Node details"
+          ansible.builtin.debug:
+            msg: "{{ item.stdout_lines }}"
+          loop: "{{ node_info.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+    # ═══ ACTION: provision ═══
+    - name: "Provision nodes"
+      when: action == "provision"
+      block:
+        - name: "Validate targets"
+          ansible.builtin.assert:
+            that: target_nodes | length > 0
+            fail_msg: "No targets specified"
+
+        - name: "Assign category to nodes"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "device; use {{ item }}; set category {{ category }}; commit"
+          loop: "{{ target_nodes }}"
+          register: cat_assign
+
+        - name: "Set node to INSTALL mode"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "device; use {{ item }}; set status INSTALL; commit"
+          loop: "{{ target_nodes }}"
+
+        - name: "Power cycle nodes"
+          ansible.builtin.shell: |
+            {{ cmsh_bin }} -c "device; use {{ item }}; power reset" 2>/dev/null || echo "Power reset sent"
+          loop: "{{ target_nodes }}"
+          failed_when: false
+
+        - name: "Provisioning initiated"
+          ansible.builtin.debug:
+            msg: |
+              ═══ PROVISIONING INITIATED ═══
+              Nodes:    {{ target_nodes | join(', ') }}
+              Category: {{ category }}
+              Action:   Set to INSTALL + power reset
+              Note:     Nodes will PXE boot and re-image

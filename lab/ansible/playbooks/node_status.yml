@@ -1,0 +1,52 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# BCM Node Status — Set UP / CLOSED / DOWN / INSTALL
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   # Set nodes UP
+#   ansible-playbook playbooks/node_status.yml \
+#       -e "targets=['cpu-n01','cpu-n02']" -e "bcm_status=UP"
+#
+#   # Set node to INSTALL (triggers PXE re-provision)
+#   ansible-playbook playbooks/node_status.yml \
+#       -e "targets=['cpu-n01']" -e "bcm_status=INSTALL"
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "BCM Node Status Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    bcm_status: "UP"
+
+  tasks:
+    - name: "Validate BCM status value"
+      ansible.builtin.assert:
+        that: bcm_status | upper in ['UP', 'CLOSED', 'DOWN', 'INSTALL']
+        fail_msg: "Invalid bcm_status '{{ bcm_status }}'. Must be UP, CLOSED, DOWN, or INSTALL."
+
+    - name: "Validate targets provided"
+      ansible.builtin.assert:
+        that: target_nodes | length > 0
+        fail_msg: "No targets specified. Use -e \"targets=['cpu-n01']\""
+
+    - name: "Set BCM status on target nodes"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; set status {{ bcm_status | upper }}; commit"
+      loop: "{{ target_nodes }}"
+      register: status_set
+
+    - name: "Verify BCM status"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; get status" | tail -1
+      loop: "{{ target_nodes }}"
+      register: status_verify
+      changed_when: false
+
+    - name: "Report"
+      ansible.builtin.debug:
+        msg: "{{ item.item }} → {{ item.stdout | trim }}"
+      loop: "{{ status_verify.results }}"
+      loop_control:
+        label: "{{ item.item }}"

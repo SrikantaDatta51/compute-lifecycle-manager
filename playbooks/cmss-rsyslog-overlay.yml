@@ -1,0 +1,202 @@
+---
+# ═══════════════════════════════════════════════════════════════════════
+# BCM CMSS — RSyslog MLX5 Filter Overlay
+# ═══════════════════════════════════════════════════════════════════════
+# Creates a BCM Configuration Overlay to persist the RSyslog filter
+# across node reimaging. This ensures newly provisioned / reimaged nodes
+# automatically get the filter without re-running the playbook.
+#
+# IMPORTANT: This runs on the HEAD NODE and uses cmsh to create the
+# overlay. The actual filter file is deployed to nodes via the regular
+# rsyslog-silence.yml playbook. This overlay ensures cmsh also pushes
+# the filter during provisioning.
+#
+# Usage:
+#   # Create the CMSS overlay (run once)
+#   ansible-playbook -i inventories/local-lab/hosts.yml \
+#       playbooks/cmss-rsyslog-overlay.yml
+#
+#   # For production
+#   ansible-playbook -i inventories/az2-bmaas-prod/hosts.yml \
+#       playbooks/cmss-rsyslog-overlay.yml
+#
+#   # Remove the overlay
+#   ansible-playbook -i inventories/az2-bmaas-prod/hosts.yml \
+#       playbooks/cmss-rsyslog-overlay.yml --tags remove
+# ═══════════════════════════════════════════════════════════════════════
+
+- name: "BCM CMSS — RSyslog MLX5 Filter Overlay"
+  hosts: headnode
+  gather_facts: yes
+  vars:
+    cmss_overlay_name: "rsyslog-mlx5-filter"
+    cmss_target_category: "{{ bcm_target_category | default('default') }}"
+    # The RSyslog filter content to embed in the overlay
+    rsyslog_filter_content: |
+      # MLX5 Kernel Noise Suppression (NVIDIA workaround)
+      # Deployed via BCM CMSS overlay: {{ cmss_overlay_name }}
+      # Issue: ACCESS_REG(0x805) op_mod(0x1) failed, err(-22)
+      # Fix: DGX OS 7.4.0
+      :msg, contains, "ACCESS_REG(0x805)" stop
+      :msg, contains, "mlx5_cmd_out_err" stop
+  tags: [cmss]
+
+  tasks:
+    - name: Display CMSS overlay context
+      debug:
+        msg: |
+          ═══════════════════════════════════════════════════════
+           BCM CMSS Overlay — RSyslog MLX5 Filter
+          ═══════════════════════════════════════════════════════
+           Overlay Name:    {{ cmss_overlay_name }}
+           Target Category: {{ cmss_target_category }}
+           Environment:     {{ env_name | default('local') }}
+          ═══════════════════════════════════════════════════════
+
+    # ── Stage filter file on head node ────────────────────────────────
+    - name: Create staging directory for overlay files
+      file:
+        path: /cm/local/apps/cmd/etc/htdocs/overlay-files
+        state: directory
+        mode: "0755"
+      tags: [cmss]
+
+    - name: Stage RSyslog filter config for CMSS
+      copy:
+        content: "{{ rsyslog_filter_content }}"
+        dest: /cm/local/apps/cmd/etc/htdocs/overlay-files/10-mlx5-filter.conf
+        mode: "0644"
+      tags: [cmss]
+
+    # ── Check existing overlays ───────────────────────────────────────
+    - name: List current configuration overlays
+      shell: cmsh -c "configurationoverlay list"
+      register: existing_overlays
+      changed_when: false
+      tags: [cmss]
+
+    - name: Display current overlays
+      debug:
+        msg: "{{ existing_overlays.stdout }}"
+      tags: [cmss]
+
+    # ── Create overlay ────────────────────────────────────────────────
+    - name: Create RSyslog filter configuration overlay
+      shell: |
+        cmsh -c "
+          configurationoverlay
+          add {{ cmss_overlay_name }}
+          set description 'RSyslog filter: silence mlx5 ACCESS_REG(0x805) noise — NVIDIA workaround'
+          set categories {{ cmss_target_category }}
+          roles
+          add rsyslog-filter
+          set runaliases true
+          commit
+        "
+      register: overlay_create
+      changed_when: "'successfully' in overlay_create.stdout or overlay_create.rc == 0"
+      failed_when: false
+      tags: [cmss]
+
+    - name: Display overlay creation result
+      debug:
+        msg: "{{ overlay_create.stdout | default('Overlay created') }}"
+      tags: [cmss]
+
+    # ── Add file to overlay ───────────────────────────────────────────
+    - name: Add RSyslog filter file to overlay via cmsh
+      shell: |
+        cmsh -c "
+          configurationoverlay
+          use {{ cmss_overlay_name }}
+          roles
+          use rsyslog-filter
+          add file /etc/rsyslog.d/10-mlx5-filter.conf
+          set source /cm/local/apps/cmd/etc/htdocs/overlay-files/10-mlx5-filter.conf
+          set permissions 644
+          set owner root
+          set group root
+          commit
+        "
+      register: file_add
+      changed_when: file_add.rc == 0
+      failed_when: false
+      tags: [cmss]
+
+    # ── Add post-install script to restart rsyslog ────────────────────
+    - name: Create RSyslog restart script for overlay
+      copy:
+        content: |
+          #!/bin/bash
+          # Post-install script: restart RSyslog after overlay deployment
+          # Part of CMSS overlay: {{ cmss_overlay_name }}
+          systemctl restart rsyslog
+          logger -t bcm-cmss "RSyslog filter overlay applied — mlx5 noise suppression active"
+        dest: /cm/local/apps/cmd/etc/htdocs/overlay-files/restart-rsyslog.sh
+        mode: "0755"
+      tags: [cmss]
+
+    - name: Add post-install script to overlay
+      shell: |
+        cmsh -c "
+          configurationoverlay
+          use {{ cmss_overlay_name }}
+          roles
+          use rsyslog-filter
+          set postinstallscript /cm/local/apps/cmd/etc/htdocs/overlay-files/restart-rsyslog.sh
+          commit
+        "
+      register: script_add
+      changed_when: script_add.rc == 0
+      failed_when: false
+      tags: [cmss]
+
+    # ── Verify ────────────────────────────────────────────────────────
+    - name: Verify overlay configuration
+      shell: |
+        echo "=== Overlay Details ==="
+        cmsh -c "configurationoverlay; use {{ cmss_overlay_name }}; show"
+        echo ""
+        echo "=== Overlay Roles ==="
+        cmsh -c "configurationoverlay; use {{ cmss_overlay_name }}; roles; list"
+      register: verify
+      changed_when: false
+      tags: [cmss]
+
+    - name: Display overlay verification
+      debug:
+        msg: "{{ verify.stdout }}"
+      tags: [cmss]
+
+    - name: CMSS summary
+      debug:
+        msg: |
+          ═══ CMSS Overlay Created ═══
+          ✅ Overlay: {{ cmss_overlay_name }}
+          ✅ Category: {{ cmss_target_category }}
+          ✅ File: /etc/rsyslog.d/10-mlx5-filter.conf
+          ✅ Post-install: RSyslog restart
+          
+          Nodes in category "{{ cmss_target_category }}" will automatically
+          receive this filter on next provisioning / reimaging.
+          
+          To apply immediately to running nodes, run:
+            ansible-playbook -i inventories/ENV/hosts.yml playbooks/rsyslog-silence.yml
+
+    # ── Remove overlay (rollback) ─────────────────────────────────────
+    - name: "REMOVE: Delete RSyslog overlay"
+      shell: |
+        cmsh -c "
+          configurationoverlay
+          remove {{ cmss_overlay_name }}
+          commit
+        "
+      register: remove_result
+      changed_when: remove_result.rc == 0
+      failed_when: false
+      tags: [remove, never]
+
+    - name: "REMOVE: Display removal result"
+      debug:
+        msg: "{{ remove_result.stdout | default('Overlay removed') }}"
+      tags: [remove, never]

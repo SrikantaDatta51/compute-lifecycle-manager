@@ -1,0 +1,44 @@
+---
+# ═══════════════════════════════════════════════════════════════════
+# Power Management — Power On/Off/Reset/Status via cmsh
+# ═══════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   ansible-playbook playbooks/power_manage.yml \
+#       -e "targets=['cpu-n01']" -e "power_action=status"
+#
+#   Actions: on, off, reset, status
+# ═══════════════════════════════════════════════════════════════════
+
+- name: "Power Management"
+  hosts: bcm_headnodes
+  gather_facts: false
+  vars:
+    target_nodes: "{{ (targets if targets is iterable and targets is not string else targets | from_yaml) if targets is defined else [] }}"
+    power_action: "status"
+
+  tasks:
+    - name: "Validate action"
+      ansible.builtin.assert:
+        that: power_action in ['on', 'off', 'reset', 'status']
+        fail_msg: "Invalid power_action '{{ power_action }}'. Must be on, off, reset, or status."
+
+    - name: "Validate targets"
+      ansible.builtin.assert:
+        that: target_nodes | length > 0
+        fail_msg: "No targets specified."
+
+    - name: "Execute power {{ power_action }}"
+      ansible.builtin.shell: |
+        {{ cmsh_bin }} -c "device; use {{ item }}; power {{ power_action }}" 2>&1
+      loop: "{{ target_nodes }}"
+      register: power_result
+      changed_when: power_action != 'status'
+      failed_when: false
+
+    - name: "Power {{ power_action }} result"
+      ansible.builtin.debug:
+        msg: "{{ item.item }}: {{ item.stdout | default('OK') | trim }}"
+      loop: "{{ power_result.results }}"
+      loop_control:
+        label: "{{ item.item }}"

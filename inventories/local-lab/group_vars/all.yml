@@ -1,0 +1,48 @@
+---
+# ─── AZ2-Staging Environment Variables ────────────────────────────────
+env_name: local-lab
+env_description: "Local Lab — BCM Development Workstation"
+
+# ─── BCM Configuration ───────────────────────────────────────────────
+bcm_version: "11.0"
+bcm_head_ip: "192.168.200.254"
+bcm_internal_network: "internalnet"
+bcm_external_network: "externalnet"
+bcm_domain: "lab.local"
+
+# ─── DNS Configuration ──────────────────────────────────────────────
+dns_nameservers:
+  - "192.168.200.254"
+  - "8.8.8.8"
+dns_search_domains:
+  - "lab.local"
+  - "cluster.local"
+
+# ─── NTP Configuration ──────────────────────────────────────────────
+ntp_servers:
+  - "192.168.200.254"
+
+# ─── Node Categories ────────────────────────────────────────────────
+bcm_categories:
+  - name: default
+    image: default-image
+    nodes: [node001, node002, node003]
+  - name: gpu-nodes
+    image: default-image
+    nodes: [node003]
+    kernel_params: "iommu=pt"
+
+# ─── Slurm Configuration ────────────────────────────────────────────
+slurm_partition: "defq"
+slurm_default_partition: true
+
+# ─── Software Image ─────────────────────────────────────────────────
+bcm_image: "default-image"
+
+# ─── Monitoring ──────────────────────────────────────────────────────
+enable_health_checks: true
+health_check_services:
+  - cmd
+  - slurmctld
+  - slurmdbd
+  - dhcpd
